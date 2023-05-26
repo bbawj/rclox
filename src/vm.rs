@@ -13,7 +13,13 @@ pub struct Vm<'a> {
     pub stack_top: u8,
 }
 
+pub struct TokenError {
+    line: usize,
+    message: String,
+}
+
 pub enum InterpretError {
+    InterpretTokenError(TokenError),
     InterpretCompileError,
     InterpretRuntimeError,
 }
