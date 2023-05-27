@@ -43,6 +43,13 @@ pub fn disassemble_instruction(chunk: &Chunk, instruction: &OpCode, offset: usiz
         OpCode::OpSubtract => simple_instruction("OpSubtract", offset),
         OpCode::OpMultiply => simple_instruction("OpMultiply", offset),
         OpCode::OpDivide => simple_instruction("OpDivide", offset),
+        OpCode::OpNil => simple_instruction("OpNil", offset),
+        OpCode::OpTrue => simple_instruction("OpTrue", offset),
+        OpCode::OpFalse => simple_instruction("OpFalse", offset),
+        OpCode::OpNot => simple_instruction("OpNot", offset),
+        OpCode::OpEqual => simple_instruction("OpEqual", offset),
+        OpCode::OpGreater => simple_instruction("OpGreater", offset),
+        OpCode::OpLess => simple_instruction("OpLess", offset),
     }
 }
 

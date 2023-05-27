@@ -1,22 +1,17 @@
-use std::{cell::RefCell, rc::Weak};
-
 use crate::{
     chunk::{Chunk, OpCode},
-    compile::{self, Compiler},
+    compile::Compiler,
     debug::disassemble_instruction,
-    value::Value,
+    value::{
+        as_bool, as_number, bool_val, is_bool, is_nil, is_number, nil_val, number_val,
+        values_equal, Value, ValueType,
+    },
 };
 
 pub struct Vm {
     pub chunk: Chunk,
-    // pub instructions: Vec<OpCode>,
     pub stack: [Value; 256],
     pub stack_top: u8,
-}
-
-pub struct TokenError {
-    line: usize,
-    message: String,
 }
 
 #[derive(Debug)]
@@ -44,7 +39,10 @@ impl Vm {
         Ok(Self {
             chunk,
             // instructions: chunk.code,
-            stack: [0.0; 256],
+            stack: [Value {
+                value_type: ValueType::ValNil,
+                _as: crate::value::As { number: 0.0 },
+            }; 256],
             stack_top: 0,
         })
     }
@@ -68,25 +66,56 @@ impl Vm {
             match instruction {
                 OpCode::OpConstant(c) => {
                     let constant = self.chunk.constants.get(c.clone() as usize).unwrap();
-                    self.push(constant.clone());
+                    self.push(*constant);
+                    Ok(())
                 }
                 OpCode::OpConstantLong(c) => {
                     let constant = self.chunk.constants.get(c.clone() as usize).unwrap();
                     println!("{}", constant);
+                    Ok(())
                 }
                 OpCode::OpReturn => {
                     println!("{}", self.pop());
                     return Ok(());
                 }
                 OpCode::OpNegate => {
-                    self.stack[self.stack_top as usize - 1] =
-                        -self.stack[self.stack_top as usize - 1];
+                    if !is_number(self.peek(0)) {
+                        return Err(InterpretError::InterpretRuntimeError);
+                    }
+                    let number = -as_number(self.pop());
+                    self.push(number_val(number));
+                    Ok(())
                 }
                 OpCode::OpAdd => self.binary_op('+'),
                 OpCode::OpSubtract => self.binary_op('-'),
                 OpCode::OpMultiply => self.binary_op('*'),
                 OpCode::OpDivide => self.binary_op('/'),
-            }
+                OpCode::OpNil => {
+                    self.push(nil_val());
+                    Ok(())
+                }
+                OpCode::OpTrue => {
+                    self.push(bool_val(true));
+                    Ok(())
+                }
+                OpCode::OpFalse => {
+                    self.push(bool_val(false));
+                    Ok(())
+                }
+                OpCode::OpNot => {
+                    let value = Vm::is_falsey(self.pop());
+                    self.push(bool_val(!value));
+                    Ok(())
+                }
+                OpCode::OpEqual => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push(bool_val(values_equal(a, b)));
+                    Ok(())
+                }
+                OpCode::OpGreater => self.binary_op('>'),
+                OpCode::OpLess => self.binary_op('<'),
+            }?;
         }
         Ok(())
     }
@@ -101,15 +130,33 @@ impl Vm {
         return self.stack[self.stack_top as usize];
     }
 
-    fn binary_op(&mut self, op: char) {
-        let b = self.pop();
-        let a = self.pop();
+    fn peek(&self, distance: usize) -> Value {
+        return self.stack[self.stack_top as usize - 1 - distance];
+    }
+
+    fn reset_stack(&mut self) {
+        self.stack_top = 0;
+    }
+
+    fn binary_op(&mut self, op: char) -> Result<(), InterpretError> {
+        if !is_number(self.peek(0)) || !is_number(self.peek(1)) {
+            return Err(InterpretError::InterpretRuntimeError);
+        }
+        let b = as_number(self.pop());
+        let a = as_number(self.pop());
         match op {
-            '+' => self.push(a + b),
-            '-' => self.push(a - b),
-            '*' => self.push(a * b),
-            '/' => self.push(a / b),
+            '+' => self.push(number_val(a + b)),
+            '-' => self.push(number_val(a - b)),
+            '*' => self.push(number_val(a * b)),
+            '/' => self.push(number_val(a / b)),
+            '>' => self.push(bool_val(a > b)),
+            '<' => self.push(bool_val(a < b)),
             _ => unreachable!(),
         }
+        Ok(())
+    }
+
+    fn is_falsey(value: Value) -> bool {
+        return is_nil(value) || is_bool(value) && !as_bool(value);
     }
 }

@@ -4,6 +4,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
     scanner::{Scanner, Token, TokenType},
+    value::number_val,
     vm::InterpretError,
 };
 
@@ -54,196 +55,235 @@ pub struct Compiler {
 
 pub type RuleArray = [ParseRule; 39];
 static RULES: RuleArray = [
+    //0
     ParseRule {
         prefix: Some(ParseFn::Grouping),
         infix: None,
         precedence: Precedence::None,
     },
+    //1
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //2
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //3
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //4
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //5
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //6
     ParseRule {
         prefix: Some(ParseFn::Unary),
         infix: Some(ParseFn::Binary),
         precedence: Precedence::Term,
     },
+    //7
     ParseRule {
         prefix: None,
         infix: Some(ParseFn::Binary),
         precedence: Precedence::Term,
     },
+    //8
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //9
     ParseRule {
         prefix: None,
         infix: Some(ParseFn::Binary),
         precedence: Precedence::Factor,
     },
+    //10
     ParseRule {
         prefix: None,
         infix: Some(ParseFn::Binary),
         precedence: Precedence::Factor,
     },
+    //11
+    ParseRule {
+        prefix: Some(ParseFn::Unary),
+        infix: None,
+        precedence: Precedence::None,
+    },
+    //12
+    ParseRule {
+        prefix: None,
+        infix: Some(ParseFn::Binary),
+        precedence: Precedence::Equality,
+    },
+    //13
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //14
+    ParseRule {
+        prefix: None,
+        infix: Some(ParseFn::Binary),
+        precedence: Precedence::Equality,
+    },
+    //15
+    ParseRule {
+        prefix: None,
+        infix: Some(ParseFn::Binary),
+        precedence: Precedence::Comparison,
+    },
+    //16
+    ParseRule {
+        prefix: None,
+        infix: Some(ParseFn::Binary),
+        precedence: Precedence::Comparison,
+    },
+    //17
+    ParseRule {
+        prefix: None,
+        infix: Some(ParseFn::Binary),
+        precedence: Precedence::Comparison,
+    },
+    //18
+    ParseRule {
+        prefix: None,
+        infix: Some(ParseFn::Binary),
+        precedence: Precedence::Comparison,
+    },
+    //19
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //20
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
+    //21
     ParseRule {
         prefix: Some(ParseFn::Number),
         infix: None,
         precedence: Precedence::None,
     },
+    //22
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //23
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //24
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //25
+    ParseRule {
+        prefix: Some(ParseFn::Literal),
+        infix: None,
+        precedence: Precedence::None,
+    },
+    //26
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //27
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //28
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //29
+    ParseRule {
+        prefix: Some(ParseFn::Literal),
+        infix: None,
+        precedence: Precedence::None,
+    },
+    //30
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //31
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //32
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //33
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //34
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //35
+    ParseRule {
+        prefix: Some(ParseFn::Literal),
+        infix: None,
+        precedence: Precedence::None,
+    },
+    //36
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
+    //37
     ParseRule {
         prefix: None,
         infix: None,
         precedence: Precedence::None,
     },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
-    ParseRule {
-        prefix: None,
-        infix: None,
-        precedence: Precedence::None,
-    },
+    //38
     ParseRule {
         prefix: None,
         infix: None,
@@ -328,6 +368,15 @@ impl Compiler {
         self.current_chunk().write_chunk(code, line)
     }
 
+    fn emit_bytes(&mut self, code1: OpCode, code2: OpCode) {
+        let mut line = 1;
+        if let Some(prev_token) = self.parser.previous.as_ref() {
+            line = prev_token.line
+        }
+        self.current_chunk().write_chunk(code1, line);
+        self.current_chunk().write_chunk(code2, line)
+    }
+
     fn current_chunk(&mut self) -> &mut Chunk {
         self.compiling_chunk.as_mut().unwrap()
     }
@@ -343,9 +392,20 @@ impl Compiler {
 
         if let crate::scanner::Literal::Number(number) = literal {
             self.current_chunk()
-                .write_constant(number.clone(), prev_token_line)
+                .write_constant(number_val(number.clone()), prev_token_line)
         }
 
+        Ok(())
+    }
+
+    fn literal(&mut self) -> Result<(), InterpretError> {
+        let prev_token = self.parser.previous.as_ref().unwrap();
+        match prev_token.token_type {
+            TokenType::False => self.emit_byte(OpCode::OpFalse),
+            TokenType::Nil => self.emit_byte(OpCode::OpNil),
+            TokenType::True => self.emit_byte(OpCode::OpTrue),
+            _ => unreachable!(),
+        }
         Ok(())
     }
 
@@ -361,6 +421,7 @@ impl Compiler {
 
         match operator {
             TokenType::Minus => self.emit_byte(OpCode::OpNegate),
+            TokenType::Bang => self.emit_byte(OpCode::OpNot),
             _ => unreachable!(),
         }
         Ok(())
@@ -376,6 +437,12 @@ impl Compiler {
             TokenType::Plus => self.emit_byte(OpCode::OpAdd),
             TokenType::Slash => self.emit_byte(OpCode::OpDivide),
             TokenType::Star => self.emit_byte(OpCode::OpMultiply),
+            TokenType::BangEqual => self.emit_bytes(OpCode::OpEqual, OpCode::OpNot),
+            TokenType::EqualEqual => self.emit_byte(OpCode::OpEqual),
+            TokenType::Greater => self.emit_byte(OpCode::OpGreater),
+            TokenType::GreaterEqual => self.emit_bytes(OpCode::OpLess, OpCode::OpNot),
+            TokenType::Less => self.emit_byte(OpCode::OpLess),
+            TokenType::LessEqual => self.emit_bytes(OpCode::OpGreater, OpCode::OpNot),
             _ => unreachable!(),
         }
         Ok(())
@@ -410,6 +477,7 @@ impl Compiler {
             ParseFn::Unary => self.unary(),
             ParseFn::Binary => self.binary(),
             ParseFn::Number => self.number(),
+            ParseFn::Literal => self.literal(),
         }
     }
 }
@@ -427,6 +495,7 @@ enum ParseFn {
     Unary,
     Binary,
     Number,
+    Literal,
 }
 
 fn get_rule(operator_type: &TokenType) -> &ParseRule {

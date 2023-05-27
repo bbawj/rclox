@@ -1,11 +1,16 @@
-use std::rc::Rc;
-
 use crate::value::{Value, ValueArray};
 
 #[derive(Debug, Clone)]
 pub enum OpCode {
     OpConstant(u8),
     OpConstantLong(u32),
+    OpNil,
+    OpTrue,
+    OpFalse,
+    OpEqual,
+    OpGreater,
+    OpLess,
+    OpNot,
     OpNegate,
     OpAdd,
     OpSubtract,
@@ -14,7 +19,7 @@ pub enum OpCode {
     OpReturn,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: ValueArray,
