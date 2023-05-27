@@ -1,6 +1,6 @@
 use crate::chunk::{Chunk, OpCode};
 
-pub fn disassemble_chunk(chunk: Chunk, name: &str) {
+pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
 
     for (offset, instruction) in chunk.code.iter().enumerate() {

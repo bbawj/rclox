@@ -1,10 +1,10 @@
-use crate::vm::{InterpretError, TokenError};
-
+#[derive(Debug, Clone)]
 pub enum Literal {
     Number(f64),
     String(String),
 }
 
+#[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
@@ -12,6 +12,7 @@ pub struct Token {
     pub literal: Option<Literal>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     Error,
     // Single-character tokens.
@@ -26,8 +27,6 @@ pub enum TokenType {
     Semicolon,
     Slash,
     Star,
-    Question,
-    Colon,
 
     // One or two character tokens.
     Bang,
@@ -67,19 +66,59 @@ pub enum TokenType {
 
 pub struct Scanner {
     source: String,
+    source_pos: usize,
     line: usize,
 }
 
 impl Scanner {
     pub fn new(source: String) -> Self {
-        Self { source, line: 1 }
+        Self {
+            source,
+            source_pos: 0,
+            line: 1,
+        }
     }
 
-    pub fn scan_token(&mut self) -> Result<Token, InterpretError> {
-        let mut iter = self.source.chars().peekable();
+    fn next(&mut self) -> Option<char> {
+        let mut source = self.source[self.source_pos..].chars();
+
+        match source.next() {
+            Some(c) => {
+                self.source_pos += c.len_utf8();
+                Some(c)
+            }
+            None => None,
+        }
+    }
+
+    pub fn next_if(&mut self, func: impl FnOnce(&char) -> bool) -> Option<char> {
+        let mut source = self.source[self.source_pos..].chars().peekable();
+
+        match source.next_if(func) {
+            Some(c) => {
+                self.source_pos += c.len_utf8();
+                Some(c)
+            }
+            None => None,
+        }
+    }
+
+    pub fn next_if_eq(&mut self, expected: &char) -> Option<char> {
+        self.next_if(|next| next == expected)
+    }
+
+    pub fn peek(&mut self) -> Option<char> {
+        self.source[self.source_pos..]
+            .chars()
+            .peekable()
+            .peek()
+            .copied()
+    }
+
+    pub fn scan_token(&mut self) -> Token {
         loop {
             let mut text = String::new();
-            let c = iter.next();
+            let c = self.next();
 
             if c.is_none() {
                 return self.create_token(TokenType::Eof, "".to_string());
@@ -89,60 +128,60 @@ impl Scanner {
                 text.push(character);
 
                 match character {
-                    '(' => self.create_token(TokenType::LeftParen, text),
-                    ')' => self.create_token(TokenType::RightParen, text),
-                    '{' => self.create_token(TokenType::LeftBrace, text),
-                    '}' => self.create_token(TokenType::RightBrace, text),
-                    ',' => self.create_token(TokenType::Comma, text),
-                    '.' => self.create_token(TokenType::Dot, text),
-                    '-' => self.create_token(TokenType::Minus, text),
-                    '+' => self.create_token(TokenType::Plus, text),
-                    ';' => self.create_token(TokenType::Semicolon, text),
-                    '*' => self.create_token(TokenType::Star, text),
-                    '?' => self.create_token(TokenType::Question, text),
-                    ':' => self.create_token(TokenType::Colon, text),
+                    '(' => return self.create_token(TokenType::LeftParen, text),
+                    ')' => return self.create_token(TokenType::RightParen, text),
+                    '{' => return self.create_token(TokenType::LeftBrace, text),
+                    '}' => return self.create_token(TokenType::RightBrace, text),
+                    ',' => return self.create_token(TokenType::Comma, text),
+                    '.' => return self.create_token(TokenType::Dot, text),
+                    '-' => return self.create_token(TokenType::Minus, text),
+                    '+' => return self.create_token(TokenType::Plus, text),
+                    ';' => return self.create_token(TokenType::Semicolon, text),
+                    '*' => return self.create_token(TokenType::Star, text),
                     '!' => {
-                        let next = iter.next_if_eq(&'=');
-                        if next.is_some() {
-                            text.push(next.unwrap());
+                        if let Some(c) = self.next_if_eq(&'=') {
+                            text.push(c);
+                            self.source_pos += c.len_utf8();
                             return self.create_token(TokenType::BangEqual, text);
                         } else {
                             return self.create_token(TokenType::Bang, text);
                         }
                     }
                     '=' => {
-                        let next = iter.next_if_eq(&'=');
-                        if next.is_some() {
-                            text.push(next.unwrap());
+                        if let Some(c) = self.next_if_eq(&'=') {
+                            text.push(c);
+                            self.source_pos += c.len_utf8();
                             return self.create_token(TokenType::EqualEqual, text);
                         } else {
                             return self.create_token(TokenType::Equal, text);
                         }
                     }
                     '>' => {
-                        let next = iter.next_if_eq(&'=');
-                        if next.is_some() {
-                            text.push(next.unwrap());
+                        if let Some(c) = self.next_if_eq(&'=') {
+                            text.push(c);
+                            self.source_pos += c.len_utf8();
                             return self.create_token(TokenType::GreaterEqual, text);
                         } else {
                             return self.create_token(TokenType::Greater, text);
                         }
                     }
                     '<' => {
-                        let next = iter.next_if_eq(&'=');
-                        if next.is_some() {
-                            text.push(next.unwrap());
+                        if let Some(c) = self.next_if_eq(&'=') {
+                            text.push(c);
+                            self.source_pos += c.len_utf8();
                             return self.create_token(TokenType::LessEqual, text);
                         } else {
                             return self.create_token(TokenType::Less, text);
                         }
                     }
                     '/' => {
-                        let next = iter.next_if_eq(&'/');
-                        if next.is_some() {
-                            while iter.next_if(|&x| x != '\n').is_some() {}
+                        if let Some(c) = self.next_if_eq(&'/') {
+                            self.source_pos += c.len_utf8();
+                            while let Some(ch) = self.next_if(|&x| x != '\n') {
+                                self.source_pos += ch.len_utf8();
+                            }
                             //discard the newline
-                            iter.next();
+                            self.next();
                         }
                         return self.create_token(TokenType::Slash, text);
                     }
@@ -154,20 +193,20 @@ impl Scanner {
                     '"' => {
                         loop {
                             // end of file
-                            if iter.peek().is_none() {
+                            if self.peek().is_none() {
                                 return self.create_token(
                                     TokenType::Error,
                                     "Unterminated string.".to_string(),
                                 );
                             }
 
-                            let next = iter.next_if(|&x| x != '"');
+                            let next = self.next_if(|&x| x != '"');
 
                             match next {
                                 Some(ch) => text.push(ch),
                                 None => {
                                     // discard the '"'
-                                    iter.next();
+                                    self.next();
                                     break;
                                 }
                             }
@@ -180,29 +219,32 @@ impl Scanner {
                     }
                     _ => {
                         if character.is_digit(10) {
-                            while let Some(ch) = iter.next_if(|x| x.is_digit(10)) {
+                            while let Some(ch) = self.next_if(|x| x.is_digit(10)) {
                                 text.push(ch);
                             }
 
                             // fractional
-                            let peek = iter.peek();
+                            let peek = self.peek();
                             match peek {
                                 Some(ch) => {
-                                    if ch == &'.' {
+                                    if ch == '.' {
                                         // ensure that after '.' is digits
-                                        let mut iter_clone = iter.clone();
+                                        let mut self_clone = self.source[self.source_pos..]
+                                            .chars()
+                                            .peekable()
+                                            .clone();
                                         // discard '.'
-                                        iter_clone.next();
-                                        let next = iter_clone.peek();
+                                        self_clone.next();
+                                        let next = self_clone.peek();
                                         match next {
                                             Some(x) => {
                                                 if x.is_digit(10) {
-                                                    if let Some(dot) = iter.next() {
+                                                    if let Some(dot) = self.next() {
                                                         text.push(dot);
                                                     }
 
                                                     while let Some(ch) =
-                                                        iter.next_if(|x| x.is_digit(10))
+                                                        self.next_if(|x| x.is_digit(10))
                                                     {
                                                         text.push(ch);
                                                     }
@@ -222,7 +264,7 @@ impl Scanner {
                                 ),
                             );
                         } else if character.is_alphanumeric() {
-                            while let Some(ch) = iter.next_if(|x| x.is_alphanumeric()) {
+                            while let Some(ch) = self.next_if(|x| x.is_alphanumeric()) {
                                 text.push(ch);
                             }
 
@@ -230,112 +272,112 @@ impl Scanner {
                                 "and" => {
                                     return self.create_token_with_literal(
                                         TokenType::And,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "class" => {
                                     return self.create_token_with_literal(
                                         TokenType::Class,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "else" => {
                                     return self.create_token_with_literal(
                                         TokenType::Else,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "if" => {
                                     return self.create_token_with_literal(
                                         TokenType::If,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "nil" => {
                                     return self.create_token_with_literal(
                                         TokenType::Nil,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "or" => {
                                     return self.create_token_with_literal(
                                         TokenType::Or,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "print" => {
                                     return self.create_token_with_literal(
                                         TokenType::Print,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "return" => {
                                     return self.create_token_with_literal(
                                         TokenType::Return,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "super" => {
                                     return self.create_token_with_literal(
                                         TokenType::Super,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "var" => {
                                     return self.create_token_with_literal(
                                         TokenType::Var,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "while" => {
                                     return self.create_token_with_literal(
                                         TokenType::And,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "false" => {
                                     return self.create_token_with_literal(
                                         TokenType::False,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "for" => {
                                     return self.create_token_with_literal(
                                         TokenType::For,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "fun" => {
                                     return self.create_token_with_literal(
                                         TokenType::Fun,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "this" => {
                                     return self.create_token_with_literal(
                                         TokenType::This,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
                                 "true" => {
                                     return self.create_token_with_literal(
                                         TokenType::True,
-                                        text,
+                                        text.clone(),
                                         Literal::String(text),
                                     )
                                 }
@@ -352,18 +394,12 @@ impl Scanner {
         }
     }
 
-    fn create_token(&self, token_type: TokenType, text: String) -> Result<Token, InterpretError> {
-        match token_type {
-            TokenType::Error => Err(InterpretError::InterpretTokenError(TokenError {
-                message: text,
-                line: self.line,
-            })),
-            _ => Ok(Token {
-                token_type,
-                lexeme: text,
-                line: self.line,
-                literal: None,
-            }),
+    fn create_token(&self, token_type: TokenType, text: String) -> Token {
+        Token {
+            token_type,
+            lexeme: text,
+            line: self.line,
+            literal: None,
         }
     }
 
@@ -372,12 +408,12 @@ impl Scanner {
         token_type: TokenType,
         text: String,
         literal: Literal,
-    ) -> Result<Token, InterpretError> {
-        Ok(Token {
+    ) -> Token {
+        Token {
             token_type,
             lexeme: text,
             line: self.line,
             literal: Some(literal),
-        })
+        }
     }
 }
