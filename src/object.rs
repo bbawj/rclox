@@ -1,8 +1,12 @@
+use crate::interner::Interner;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Obj {
-    ObjString(String),
+    ObjString(u32),
 }
 
-pub fn allocate_string(string: String) -> Obj {
-    Obj::ObjString(string)
+pub fn allocate_string(interner: &mut Interner, string: String) -> Obj {
+    let id = interner.intern(&string);
+
+    Obj::ObjString(id)
 }

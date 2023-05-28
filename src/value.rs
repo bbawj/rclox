@@ -1,6 +1,6 @@
 // pub type Value = f64;
 
-use crate::object::Obj;
+use crate::{interner::Interner, object::Obj};
 
 pub type ValueArray = Vec<Value>;
 
@@ -11,19 +11,6 @@ pub enum Value {
     ValNil,
     ValObj(Box<Obj>),
 }
-
-// #[derive(Copy, Clone)]
-// pub struct Value {
-//     pub value_type: ValueType,
-//     pub _as: As,
-// }
-
-// #[derive(Copy, Clone)]
-// pub union As {
-//     pub boolean: bool,
-//     pub number: f64,
-//     pub obj: Box<Obj>,
-// }
 
 pub fn bool_val(value: bool) -> Value {
     Value::ValBool(value)
@@ -41,7 +28,7 @@ pub fn obj_val(value: Box<Obj>) -> Value {
     Value::ValObj(value)
 }
 
-pub fn string_val(value: String) -> Value {
+pub fn string_val(value: u32) -> Value {
     Value::ValObj(Box::new(Obj::ObjString(value)))
 }
 
@@ -69,10 +56,10 @@ pub fn as_obj(value: Value) -> Box<Obj> {
     }
 }
 
-pub fn as_string(value: Value) -> String {
+pub fn as_string(interner: &Interner, value: Value) -> &str {
     if let Value::ValObj(a) = value {
         match *a {
-            Obj::ObjString(s) => s,
+            Obj::ObjString(id) => interner.lookup(id),
         }
     } else {
         panic!()

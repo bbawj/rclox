@@ -1,8 +1,12 @@
-use std::ops::Index;
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Index,
+};
 
 use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
+    interner::Interner,
     object::allocate_string,
     scanner::{self, Scanner, Token, TokenType},
     value::number_val,
@@ -52,6 +56,7 @@ pub struct Compiler {
     scanner: Scanner,
     parser: Parser,
     compiling_chunk: Option<Chunk>,
+    pub strings: Interner,
 }
 
 pub type RuleArray = [ParseRule; 39];
@@ -293,7 +298,7 @@ static RULES: RuleArray = [
 ];
 
 impl Compiler {
-    pub fn new(source: &str) -> Self {
+    pub fn new(source: &str, interner: Interner) -> Self {
         let source = source.to_string();
         let scanner = Scanner::new(source);
         Self {
@@ -304,6 +309,7 @@ impl Compiler {
                 had_error: false,
             },
             compiling_chunk: Some(Chunk::new()),
+            strings: interner,
         }
     }
 
@@ -403,10 +409,9 @@ impl Compiler {
         let prev_token = self.parser.previous.as_mut().unwrap();
         let line = prev_token.line;
         if let Some(scanner::Literal::String(string)) = prev_token.literal.take() {
-            self.current_chunk().write_constant(
-                crate::value::Value::ValObj(Box::new(allocate_string(string))),
-                line,
-            )
+            let value = Box::new(allocate_string(&mut self.strings, string));
+            self.current_chunk()
+                .write_constant(crate::value::Value::ValObj(value), line)
         }
         Ok(())
     }

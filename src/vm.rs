@@ -2,6 +2,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     compile::Compiler,
     debug::disassemble_instruction,
+    interner::Interner,
     value::{
         as_bool, as_number, as_string, bool_val, is_bool, is_nil, is_number, is_string, nil_val,
         number_val, string_val, values_equal, Value,
@@ -12,6 +13,7 @@ pub struct Vm {
     pub chunk: Chunk,
     pub stack: [Option<Value>; 256],
     pub stack_top: u8,
+    pub compiler: Compiler,
 }
 
 #[derive(Debug)]
@@ -45,7 +47,9 @@ impl std::error::Error for InterpretError {}
 
 impl Vm {
     pub fn new(source: &str) -> Result<Self, InterpretError> {
-        let chunk = Compiler::new(source).compile()?;
+        let interner = Interner::with_capacity(256);
+        let mut compiler = Compiler::new(source, interner);
+        let chunk = compiler.compile()?;
         const INIT: Option<Value> = None;
         const SIZE: usize = 256;
         Ok(Self {
@@ -53,6 +57,7 @@ impl Vm {
             // instructions: chunk.code,
             stack: [INIT; SIZE],
             stack_top: 0,
+            compiler,
         })
     }
 
@@ -191,10 +196,13 @@ impl Vm {
 
     fn concatenate(&mut self) -> Result<(), InterpretError> {
         // println!("hello");
-        let b = as_string(self.pop());
-        let a = as_string(self.pop());
+        let b = self.pop();
+        let a = self.pop();
+        let str_b = as_string(&self.compiler.strings, b);
+        let str_a = as_string(&self.compiler.strings, a);
+        let id = self.compiler.strings.intern(&(str_a.to_string() + str_b));
 
-        self.push(string_val(a + &b));
+        self.push(string_val(id));
         // println!("{:?}", self.stack);
         Ok(())
     }
