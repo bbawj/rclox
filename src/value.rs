@@ -42,7 +42,7 @@ pub fn obj_val(value: Box<Obj>) -> Value {
 }
 
 pub fn string_val(value: String) -> Value {
-    Value::ValObj(Box::new(Obj::ObjString(Box::new(value))))
+    Value::ValObj(Box::new(Obj::ObjString(value)))
 }
 
 pub fn as_bool(value: Value) -> bool {
@@ -72,7 +72,7 @@ pub fn as_obj(value: Value) -> Box<Obj> {
 pub fn as_string(value: Value) -> String {
     if let Value::ValObj(a) = value {
         match *a {
-            Obj::ObjString(s) => *s,
+            Obj::ObjString(s) => s,
         }
     } else {
         panic!()
