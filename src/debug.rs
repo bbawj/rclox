@@ -22,7 +22,7 @@ pub fn disassemble_instruction(chunk: &Chunk, instruction: &OpCode, offset: usiz
         OpCode::OpReturn => simple_instruction("OpReturn", offset),
         OpCode::OpConstant(c) => {
             println!(
-                "{} {:4} {}",
+                "{} {:4} {:?}",
                 "OpConstant",
                 c,
                 chunk.constants.get(c.clone() as usize).unwrap()
@@ -31,7 +31,7 @@ pub fn disassemble_instruction(chunk: &Chunk, instruction: &OpCode, offset: usiz
         }
         OpCode::OpConstantLong(c) => {
             println!(
-                "{} {:4} {}",
+                "{} {:4} {:?}",
                 "OpConstantLong",
                 c,
                 chunk.constants.get(c.clone() as usize).unwrap()

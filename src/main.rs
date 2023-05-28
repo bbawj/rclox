@@ -8,6 +8,7 @@ use vm::Vm;
 mod chunk;
 mod compile;
 mod debug;
+mod object;
 mod scanner;
 mod value;
 mod vm;

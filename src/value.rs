@@ -1,94 +1,134 @@
 // pub type Value = f64;
 
+use crate::object::Obj;
+
 pub type ValueArray = Vec<Value>;
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum ValueType {
-    ValBool,
-    ValNumber,
+#[derive(Debug, PartialEq, Clone)]
+pub enum Value {
+    ValBool(bool),
+    ValNumber(f64),
     ValNil,
+    ValObj(Box<Obj>),
 }
 
-#[derive(Copy, Clone)]
-pub struct Value {
-    pub value_type: ValueType,
-    pub _as: As,
-}
+// #[derive(Copy, Clone)]
+// pub struct Value {
+//     pub value_type: ValueType,
+//     pub _as: As,
+// }
 
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            match self.value_type {
-                ValueType::ValBool => write!(
-                    f,
-                    "Value {{ value_type: {:?}, _as: {}}}",
-                    self.value_type, self._as.boolean
-                ),
-                ValueType::ValNumber => write!(
-                    f,
-                    "Value {{ value_type: {:?}, _as: {}}}",
-                    self.value_type, self._as.number
-                ),
-                ValueType::ValNil => write!(f, "Value {{ value_type: {:?}}}", self.value_type),
-            }
-        }
-    }
-}
-
-#[derive(Copy, Clone)]
-pub union As {
-    pub boolean: bool,
-    pub number: f64,
-}
+// #[derive(Copy, Clone)]
+// pub union As {
+//     pub boolean: bool,
+//     pub number: f64,
+//     pub obj: Box<Obj>,
+// }
 
 pub fn bool_val(value: bool) -> Value {
-    Value {
-        value_type: ValueType::ValBool,
-        _as: As { boolean: value },
-    }
+    Value::ValBool(value)
 }
 
 pub fn number_val(value: f64) -> Value {
-    Value {
-        value_type: ValueType::ValNumber,
-        _as: As { number: value },
-    }
+    Value::ValNumber(value)
 }
 
 pub fn nil_val() -> Value {
-    Value {
-        value_type: ValueType::ValNil,
-        _as: As { number: 0.0 },
-    }
+    Value::ValNil
+}
+
+pub fn obj_val(value: Box<Obj>) -> Value {
+    Value::ValObj(value)
+}
+
+pub fn string_val(value: String) -> Value {
+    Value::ValObj(Box::new(Obj::ObjString(Box::new(value))))
 }
 
 pub fn as_bool(value: Value) -> bool {
-    unsafe { value._as.boolean }
+    if let Value::ValBool(v) = value {
+        v
+    } else {
+        panic!()
+    }
 }
 
 pub fn as_number(value: Value) -> f64 {
-    unsafe { value._as.number }
-}
-
-pub fn is_number(value: Value) -> bool {
-    value.value_type == ValueType::ValNumber
-}
-
-pub fn is_bool(value: Value) -> bool {
-    value.value_type == ValueType::ValBool
-}
-
-pub fn is_nil(value: Value) -> bool {
-    value.value_type == ValueType::ValNil
-}
-
-pub fn values_equal(a: Value, b: Value) -> bool {
-    if a.value_type != b.value_type {
-        return false;
+    if let Value::ValNumber(v) = value {
+        v
+    } else {
+        panic!()
     }
-    match a.value_type {
-        ValueType::ValBool => as_bool(a) == as_bool(b),
-        ValueType::ValNumber => as_number(a) == as_number(b),
-        ValueType::ValNil => true,
+}
+
+pub fn as_obj(value: Value) -> Box<Obj> {
+    if let Value::ValObj(v) = value {
+        v
+    } else {
+        panic!()
+    }
+}
+
+pub fn as_string(value: Value) -> String {
+    if let Value::ValObj(a) = value {
+        match *a {
+            Obj::ObjString(s) => *s,
+        }
+    } else {
+        panic!()
+    }
+}
+
+pub fn is_number(value: &Value) -> bool {
+    if let Value::ValNumber(_) = value {
+        true
+    } else {
+        false
+    }
+}
+
+pub fn is_bool(value: &Value) -> bool {
+    if let Value::ValBool(_) = value {
+        true
+    } else {
+        false
+    }
+}
+
+pub fn is_nil(value: &Value) -> bool {
+    if let Value::ValNil = value {
+        true
+    } else {
+        false
+    }
+}
+
+pub fn is_obj(value: &Value) -> bool {
+    if let Value::ValObj(_) = value {
+        true
+    } else {
+        false
+    }
+}
+
+pub fn is_string(value: &Value) -> bool {
+    if let Value::ValObj(a) = value {
+        match a.as_ref() {
+            Obj::ObjString(_) => true,
+        }
+    } else {
+        false
+    }
+}
+
+pub fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::ValBool(a), Value::ValBool(b)) => a == b,
+        (Value::ValNumber(a), Value::ValNumber(b)) => a == b,
+        (Value::ValNil, Value::ValNil) => true,
+        (Value::ValObj(a), Value::ValObj(b)) => match (a.as_ref(), b.as_ref()) {
+            (Obj::ObjString(a), Obj::ObjString(b)) => a == b,
+        },
+        _ => false,
     }
 }

@@ -3,7 +3,8 @@ use std::ops::Index;
 use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
-    scanner::{Scanner, Token, TokenType},
+    object::allocate_string,
+    scanner::{self, Scanner, Token, TokenType},
     value::number_val,
     vm::InterpretError,
 };
@@ -177,7 +178,7 @@ static RULES: RuleArray = [
     },
     //20
     ParseRule {
-        prefix: None,
+        prefix: Some(ParseFn::String),
         infix: None,
         precedence: Precedence::None,
     },
@@ -398,6 +399,18 @@ impl Compiler {
         Ok(())
     }
 
+    fn string(&mut self) -> Result<(), InterpretError> {
+        let prev_token = self.parser.previous.as_mut().unwrap();
+        let line = prev_token.line;
+        if let Some(scanner::Literal::String(string)) = prev_token.literal.take() {
+            self.current_chunk().write_constant(
+                crate::value::Value::ValObj(Box::new(allocate_string(string))),
+                line,
+            )
+        }
+        Ok(())
+    }
+
     fn literal(&mut self) -> Result<(), InterpretError> {
         let prev_token = self.parser.previous.as_ref().unwrap();
         match prev_token.token_type {
@@ -459,9 +472,7 @@ impl Compiler {
             None => self.print_error(&prev, "Expect expression.")?,
         }
 
-        while precedence
-            <= get_rule(&self.parser.current.as_ref().unwrap().token_type.clone()).precedence
-        {
+        while precedence <= get_rule(&self.parser.current.as_ref().unwrap().token_type).precedence {
             self.advance()?;
             let infix_rule = &get_rule(&self.parser.previous.as_ref().unwrap().token_type).infix;
             if let Some(f) = infix_rule {
@@ -478,6 +489,7 @@ impl Compiler {
             ParseFn::Binary => self.binary(),
             ParseFn::Number => self.number(),
             ParseFn::Literal => self.literal(),
+            ParseFn::String => self.string(),
         }
     }
 }
@@ -496,6 +508,7 @@ enum ParseFn {
     Binary,
     Number,
     Literal,
+    String,
 }
 
 fn get_rule(operator_type: &TokenType) -> &ParseRule {
