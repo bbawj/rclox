@@ -39,5 +39,7 @@ fn run_file(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = BufReader::new(file);
     let mut contents = String::new();
     reader.read_to_string(&mut contents)?;
+    let mut vm = Vm::new(&contents)?;
+    vm.interpret(false)?;
     Ok(())
 }

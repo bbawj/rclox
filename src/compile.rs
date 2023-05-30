@@ -1,16 +1,13 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Index,
-};
+use std::ops::Index;
 
 use crate::{
     chunk::{Chunk, OpCode},
-    debug::disassemble_chunk,
+    // debug::disassemble_chunk,
     interner::Interner,
     object::allocate_string,
     scanner::{self, Scanner, Token, TokenType},
     value::number_val,
-    vm::InterpretError,
+    vm::{ErrorData, InterpretError},
 };
 
 #[derive(Debug, PartialEq, PartialOrd)]
@@ -59,7 +56,8 @@ pub struct Compiler {
     pub strings: Interner,
 }
 
-pub type RuleArray = [ParseRule; 39];
+type RuleArray = [ParseRule; 39];
+
 static RULES: RuleArray = [
     //0
     ParseRule {
@@ -177,7 +175,7 @@ static RULES: RuleArray = [
     },
     //19
     ParseRule {
-        prefix: None,
+        prefix: Some(ParseFn::Variable),
         infix: None,
         precedence: Precedence::None,
     },
@@ -315,13 +313,19 @@ impl Compiler {
 
     pub fn compile(&mut self) -> Result<Chunk, InterpretError> {
         self.advance()?;
-        self.expression()?;
+
+        while !self.matching(TokenType::Eof)? {
+            self.declaration()?;
+        }
+
         self.consume(TokenType::Eof, "Expect end of expression.")?;
         self.end_compiler();
         Ok(self.current_chunk().clone())
     }
 
     fn advance(&mut self) -> Result<(), InterpretError> {
+        // println!("{:?}", self.parser.current);
+        // println!("{:?}", self.parser.previous);
         self.parser.previous = self.parser.current.clone();
         loop {
             self.parser.current = Some(self.scanner.scan_token());
@@ -360,11 +364,23 @@ impl Compiler {
         self.print_error(&current_token, error_message)
     }
 
+    fn matching(&mut self, token_type: TokenType) -> Result<bool, InterpretError> {
+        if !self.check(token_type) {
+            return Ok(false);
+        }
+        self.advance()?;
+        Ok(true)
+    }
+
+    fn check(&self, token_type: TokenType) -> bool {
+        self.parser.current.as_ref().unwrap().token_type == token_type
+    }
+
     fn end_compiler(&mut self) {
         self.emit_byte(OpCode::OpReturn);
-        if !self.parser.had_error {
-            disassemble_chunk(self.current_chunk(), "code");
-        }
+        // if !self.parser.had_error {
+        //     disassemble_chunk(self.current_chunk(), "code");
+        // }
     }
 
     fn emit_byte(&mut self, code: OpCode) {
@@ -388,11 +404,82 @@ impl Compiler {
         self.compiling_chunk.as_mut().unwrap()
     }
 
+    fn declaration(&mut self) -> Result<(), InterpretError> {
+        let mut steps = || -> Result<(), InterpretError> {
+            if self.matching(TokenType::Var)? {
+                self.var_declaration()
+            } else {
+                self.statement()
+            }
+        };
+
+        match steps() {
+            Ok(_) => Ok(()),
+            Err(_) => self.synchronize(),
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<(), InterpretError> {
+        let global = self.parse_variable("Expect variable name.")?;
+        if self.matching(TokenType::Equal)? {
+            self.expression()?;
+        } else {
+            self.emit_byte(OpCode::OpNil);
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration.",
+        )?;
+        self.define_variable(global);
+        Ok(())
+    }
+
+    fn parse_variable(&mut self, error_message: &str) -> Result<u32, InterpretError> {
+        self.consume(TokenType::Identifier, error_message)?;
+        let prev_token = self.parser.previous.take().unwrap();
+        return Ok(self.identifier_constant(prev_token));
+    }
+
+    fn identifier_constant(&mut self, token: Token) -> u32 {
+        let value =
+            crate::value::Value::ValObj(Box::new(allocate_string(&mut self.strings, token.lexeme)));
+        let id = self.current_chunk().add_constant(value);
+        return id as u32;
+    }
+
+    fn define_variable(&mut self, id: u32) {
+        self.emit_byte(OpCode::OpDefineGlobal(id));
+    }
+
+    fn statement(&mut self) -> Result<(), InterpretError> {
+        if self.matching(TokenType::Print)? {
+            self.print_statement()?;
+        } else {
+            self.expression_statement()?;
+        }
+        Ok(())
+    }
+
+    fn print_statement(&mut self) -> Result<(), InterpretError> {
+        self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
+        self.emit_byte(OpCode::OpPrint);
+        Ok(())
+    }
+
+    fn expression_statement(&mut self) -> Result<(), InterpretError> {
+        self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
+        self.emit_byte(OpCode::OpPop);
+        Ok(())
+    }
+
     fn expression(&mut self) -> Result<(), InterpretError> {
         self.parse_precedence(Precedence::Assignment)
     }
 
-    fn number(&mut self) -> Result<(), InterpretError> {
+    fn number(&mut self, can_assign: bool) -> Result<(), InterpretError> {
         let prev_token = self.parser.previous.as_ref().unwrap();
         let prev_token_line = self.parser.previous.as_ref().unwrap().line;
         let literal = prev_token.literal.as_ref().unwrap().clone();
@@ -405,7 +492,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn string(&mut self) -> Result<(), InterpretError> {
+    fn string(&mut self, can_assign: bool) -> Result<(), InterpretError> {
         let prev_token = self.parser.previous.as_mut().unwrap();
         let line = prev_token.line;
         if let Some(scanner::Literal::String(string)) = prev_token.literal.take() {
@@ -416,7 +503,23 @@ impl Compiler {
         Ok(())
     }
 
-    fn literal(&mut self) -> Result<(), InterpretError> {
+    fn variable(&mut self, can_assign: bool) -> Result<(), InterpretError> {
+        let token = self.parser.previous.take().unwrap();
+        self.named_variable(token, can_assign)
+    }
+
+    fn named_variable(&mut self, name: Token, can_assign: bool) -> Result<(), InterpretError> {
+        let arg = self.identifier_constant(name);
+        if can_assign && self.matching(TokenType::Equal)? {
+            self.expression()?;
+            self.emit_byte(OpCode::OpSetGlobal(arg))
+        } else {
+            self.emit_byte(OpCode::OpGetGlobal(arg));
+        }
+        Ok(())
+    }
+
+    fn literal(&mut self, can_assign: bool) -> Result<(), InterpretError> {
         let prev_token = self.parser.previous.as_ref().unwrap();
         match prev_token.token_type {
             TokenType::False => self.emit_byte(OpCode::OpFalse),
@@ -427,12 +530,12 @@ impl Compiler {
         Ok(())
     }
 
-    fn grouping(&mut self) -> Result<(), InterpretError> {
+    fn grouping(&mut self, can_assign: bool) -> Result<(), InterpretError> {
         self.expression()?;
         self.consume(TokenType::RightParen, "Expect ')' after expression.")
     }
 
-    fn unary(&mut self) -> Result<(), InterpretError> {
+    fn unary(&mut self, can_assign: bool) -> Result<(), InterpretError> {
         let operator = self.parser.previous.as_ref().unwrap().token_type.clone();
         // compile the operand
         self.parse_precedence(Precedence::Unary)?;
@@ -445,7 +548,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn binary(&mut self) -> Result<(), InterpretError> {
+    fn binary(&mut self, can_assign: bool) -> Result<(), InterpretError> {
         let operator = self.parser.previous.as_ref().unwrap().token_type.clone();
         let rule = get_rule(&operator);
         self.parse_precedence(rule.precedence.higher())?;
@@ -472,8 +575,9 @@ impl Compiler {
         let binding = prev.token_type.clone();
         let prefix_rule = &get_rule(&binding).prefix;
 
+        let can_assign = precedence <= Precedence::Assignment;
         match prefix_rule {
-            Some(f) => self.call_parse_function(f)?,
+            Some(f) => self.call_parse_function(f, can_assign)?,
             None => self.print_error(&prev, "Expect expression.")?,
         }
 
@@ -481,21 +585,54 @@ impl Compiler {
             self.advance()?;
             let infix_rule = &get_rule(&self.parser.previous.as_ref().unwrap().token_type).infix;
             if let Some(f) = infix_rule {
-                self.call_parse_function(&f.clone())?;
+                self.call_parse_function(&f.clone(), can_assign)?;
             }
+        }
+
+        if can_assign && self.matching(TokenType::Equal)? {
+            return Err(InterpretError::InterpretCompileError(ErrorData {
+                line: self.parser.current.as_ref().unwrap().line,
+                message: "Invalid assignment target.".to_string(),
+            }));
         }
         Ok(())
     }
 
-    fn call_parse_function(&mut self, parse_fn: &ParseFn) -> Result<(), InterpretError> {
+    fn call_parse_function(
+        &mut self,
+        parse_fn: &ParseFn,
+        can_assign: bool,
+    ) -> Result<(), InterpretError> {
         match parse_fn {
-            ParseFn::Grouping => self.grouping(),
-            ParseFn::Unary => self.unary(),
-            ParseFn::Binary => self.binary(),
-            ParseFn::Number => self.number(),
-            ParseFn::Literal => self.literal(),
-            ParseFn::String => self.string(),
+            ParseFn::Grouping => self.grouping(can_assign),
+            ParseFn::Unary => self.unary(can_assign),
+            ParseFn::Binary => self.binary(can_assign),
+            ParseFn::Number => self.number(can_assign),
+            ParseFn::Literal => self.literal(can_assign),
+            ParseFn::String => self.string(can_assign),
+            ParseFn::Variable => self.variable(can_assign),
         }
+    }
+
+    fn synchronize(&mut self) -> Result<(), InterpretError> {
+        while self.parser.current.as_ref().unwrap().token_type != TokenType::Eof {
+            if self.parser.previous.as_ref().unwrap().token_type == TokenType::Semicolon {
+                return Ok(());
+            }
+
+            match self.parser.current.as_ref().unwrap().token_type {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return Ok(()),
+                _ => self.advance()?,
+            }
+        }
+        Ok(())
     }
 }
 
@@ -514,6 +651,7 @@ enum ParseFn {
     Number,
     Literal,
     String,
+    Variable,
 }
 
 fn get_rule(operator_type: &TokenType) -> &ParseRule {

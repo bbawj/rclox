@@ -1,11 +1,12 @@
+use std::collections::HashMap;
+
 use crate::{
     chunk::{Chunk, OpCode},
     compile::Compiler,
-    debug::disassemble_instruction,
     interner::Interner,
     value::{
-        as_bool, as_number, as_string, bool_val, is_bool, is_nil, is_number, is_string, nil_val,
-        number_val, string_val, values_equal, Value,
+        as_bool, as_number, as_obj, as_string, bool_val, is_bool, is_nil, is_number, is_string,
+        nil_val, number_val, string_val, values_equal, Value,
     },
 };
 
@@ -14,12 +15,13 @@ pub struct Vm {
     pub stack: [Option<Value>; 256],
     pub stack_top: u8,
     pub compiler: Compiler,
+    globals: HashMap<&'static str, Value>,
 }
 
 #[derive(Debug)]
-struct ErrorData {
-    line: usize,
-    message: String,
+pub struct ErrorData {
+    pub line: usize,
+    pub message: String,
 }
 
 #[derive(Debug)]
@@ -45,6 +47,93 @@ impl std::fmt::Display for InterpretError {
 
 impl std::error::Error for InterpretError {}
 
+impl std::fmt::Debug for Vm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "== VM ==")?;
+
+        for (offset, instruction) in self.chunk.code.iter().enumerate() {
+            write!(f, "{:04} ", offset)?;
+
+            let line = self.chunk.get_line(offset);
+            if offset > 0 && line == self.chunk.get_line(offset - 1) {
+                write!(f, "   | ")?;
+            } else {
+                write!(f, "{:4} ", line)?;
+            }
+
+            match instruction {
+                OpCode::OpReturn => writeln!(f, "OpReturn"),
+                OpCode::OpConstant(c) => {
+                    write!(f, "{} {:4} ", "OpConstant", c)?;
+                    match self.chunk.get_constant(*c as usize).unwrap() {
+                        Value::ValBool(v) => writeln!(f, "{}", v),
+                        Value::ValNumber(v) => writeln!(f, "{}", v),
+                        Value::ValNil => writeln!(f),
+                        Value::ValObj(v) => {
+                            writeln!(f, "{}", as_string(&self.compiler.strings, v))
+                        }
+                    }
+                }
+                OpCode::OpConstantLong(c) => writeln!(
+                    f,
+                    "{} {:4} {:?}",
+                    "OpConstantLong",
+                    c,
+                    self.chunk.get_constant(*c as usize).unwrap()
+                ),
+                OpCode::OpNegate => writeln!(f, "OpNegate"),
+                OpCode::OpAdd => writeln!(f, "OpAdd"),
+                OpCode::OpSubtract => writeln!(f, "OpSubtract"),
+                OpCode::OpMultiply => writeln!(f, "OpMultiply"),
+                OpCode::OpDivide => writeln!(f, "OpDivide"),
+                OpCode::OpNil => writeln!(f, "OpNil"),
+                OpCode::OpTrue => writeln!(f, "OpTrue"),
+                OpCode::OpFalse => writeln!(f, "OpFalse"),
+                OpCode::OpNot => writeln!(f, "OpNot"),
+                OpCode::OpEqual => writeln!(f, "OpEqual"),
+                OpCode::OpGreater => writeln!(f, "OpGreater"),
+                OpCode::OpLess => writeln!(f, "OpLess"),
+                OpCode::OpPrint => writeln!(f, "OpPrint"),
+                OpCode::OpPop => writeln!(f, "OpPop"),
+                OpCode::OpDefineGlobal(id) => {
+                    let value = as_obj(
+                        self.chunk
+                            .constants
+                            .get(id.clone() as usize)
+                            .unwrap()
+                            .clone(),
+                    );
+                    let name = as_string(&self.compiler.strings, &value);
+                    writeln!(f, "{} {:4} {}", "OpDefineGlobal", id, name)
+                }
+                OpCode::OpGetGlobal(id) => {
+                    let value = as_obj(
+                        self.chunk
+                            .constants
+                            .get(id.clone() as usize)
+                            .unwrap()
+                            .clone(),
+                    );
+                    let name = as_string(&self.compiler.strings, &value);
+                    writeln!(f, "{} {:4} {}", "OpGetGlobal", id, name)
+                }
+                OpCode::OpSetGlobal(id) => {
+                    let value = as_obj(
+                        self.chunk
+                            .constants
+                            .get(id.clone() as usize)
+                            .unwrap()
+                            .clone(),
+                    );
+                    let name = as_string(&self.compiler.strings, &value);
+                    writeln!(f, "{} {:4} {}", "OpSetGlobal", id, name)
+                }
+            }?;
+        }
+        Ok(())
+    }
+}
+
 impl Vm {
     pub fn new(source: &str) -> Result<Self, InterpretError> {
         let interner = Interner::with_capacity(256);
@@ -58,13 +147,14 @@ impl Vm {
             stack: [INIT; SIZE],
             stack_top: 0,
             compiler,
+            globals: HashMap::new(),
         })
     }
 
     pub fn interpret(&mut self, debug: bool) -> Result<(), InterpretError> {
-        // self.chunk = chunk;
-        // self.instructions = &self.chunk.code;
-        self.run(debug)
+        self.run(debug)?;
+        println!("{:?}", self);
+        Ok(())
     }
 
     fn run(&mut self, debug: bool) -> Result<(), InterpretError> {
@@ -75,7 +165,6 @@ impl Vm {
                 for value in &self.stack {
                     println!("[ {:?} ]", value);
                 }
-                disassemble_instruction(&self.chunk, instruction, i);
             }
             match instruction {
                 OpCode::OpConstant(c) => {
@@ -88,10 +177,7 @@ impl Vm {
                     println!("{:?}", constant);
                     Ok(())
                 }
-                OpCode::OpReturn => {
-                    println!("{:?}", self.pop());
-                    return Ok(());
-                }
+                OpCode::OpReturn => Ok(()),
                 OpCode::OpNegate => {
                     if let Value::ValNumber(number) = self.peek(0) {
                         let number = -number;
@@ -140,6 +226,53 @@ impl Vm {
                 }
                 OpCode::OpGreater => self.binary_op('>', line),
                 OpCode::OpLess => self.binary_op('<', line),
+                OpCode::OpPrint => {
+                    let val = self.pop();
+                    if let Value::ValObj(_) = &val {
+                        println!("{}", as_string(&self.compiler.strings, &as_obj(val)))
+                    } else {
+                        println!("{:?}", self.pop());
+                    }
+                    Ok(())
+                }
+                OpCode::OpPop => {
+                    self.pop();
+                    Ok(())
+                }
+                OpCode::OpDefineGlobal(id) => {
+                    let val = self.pop();
+                    let name = self.compiler.strings.lookup(id.clone());
+                    self.globals.insert(name, val);
+                    Ok(())
+                }
+                OpCode::OpGetGlobal(id) => {
+                    let value = as_obj(self.chunk.get_constant(*id as usize).unwrap().clone());
+                    let name = as_string(&self.compiler.strings, &value);
+                    if let Some(value) = self.globals.get(name) {
+                        self.push(value.clone());
+                    } else {
+                        return Err(InterpretError::InterpretRuntimeError(ErrorData {
+                            line,
+                            message: format!("Undefined variable '{}'.", name),
+                        }));
+                    }
+                    Ok(())
+                }
+                OpCode::OpSetGlobal(id) => {
+                    let value = as_obj(self.chunk.get_constant(*id as usize).unwrap().clone());
+                    let name = as_string(&self.compiler.strings, &value);
+
+                    if let Some(_) = self.globals.get(name) {
+                        let val = self.peek(0);
+                        self.globals.insert(name, val.clone());
+                    } else {
+                        return Err(InterpretError::InterpretRuntimeError(ErrorData {
+                            line,
+                            message: format!("Undefined variable '{}'.", name),
+                        }));
+                    }
+                    Ok(())
+                }
             }?;
         }
         Ok(())
@@ -196,10 +329,10 @@ impl Vm {
 
     fn concatenate(&mut self) -> Result<(), InterpretError> {
         // println!("hello");
-        let b = self.pop();
-        let a = self.pop();
-        let str_b = as_string(&self.compiler.strings, b);
-        let str_a = as_string(&self.compiler.strings, a);
+        let b = as_obj(self.pop());
+        let a = as_obj(self.pop());
+        let str_b = as_string(&self.compiler.strings, &b);
+        let str_a = as_string(&self.compiler.strings, &a);
         let id = self.compiler.strings.intern(&(str_a.to_string() + str_b));
 
         self.push(string_val(id));

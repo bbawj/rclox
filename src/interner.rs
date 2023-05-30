@@ -48,7 +48,7 @@ impl Interner {
         id
     }
 
-    pub fn lookup(&self, id: u32) -> &str {
+    pub fn lookup(&self, id: u32) -> &'static str {
         self.vec[id as usize]
     }
 }

@@ -56,13 +56,9 @@ pub fn as_obj(value: Value) -> Box<Obj> {
     }
 }
 
-pub fn as_string(interner: &Interner, value: Value) -> &str {
-    if let Value::ValObj(a) = value {
-        match *a {
-            Obj::ObjString(id) => interner.lookup(id),
-        }
-    } else {
-        panic!()
+pub fn as_string<'a>(interner: &'a Interner, obj: &'a Obj) -> &'static str {
+    match obj {
+        Obj::ObjString(id) => interner.lookup(*id),
     }
 }
 

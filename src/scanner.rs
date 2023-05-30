@@ -214,7 +214,7 @@ impl Scanner {
                         return self.create_token_with_literal(
                             TokenType::String,
                             text.clone(),
-                            Literal::String(text),
+                            Literal::String(text[1..].to_string()),
                         );
                     }
                     _ => {

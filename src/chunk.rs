@@ -4,6 +4,9 @@ use crate::value::{Value, ValueArray};
 pub enum OpCode {
     OpConstant(u8),
     OpConstantLong(u32),
+    OpDefineGlobal(u32),
+    OpGetGlobal(u32),
+    OpSetGlobal(u32),
     OpNil,
     OpTrue,
     OpFalse,
@@ -16,6 +19,8 @@ pub enum OpCode {
     OpSubtract,
     OpMultiply,
     OpDivide,
+    OpPrint,
+    OpPop,
     OpReturn,
 }
 
@@ -68,6 +73,10 @@ impl Chunk {
         } else {
             self.write_chunk(OpCode::OpConstantLong(idx.try_into().unwrap()), line);
         }
+    }
+
+    pub fn get_constant(&self, idx: usize) -> Option<&Value> {
+        self.constants.get(idx)
     }
 
     pub fn get_line(&self, offset: usize) -> usize {
