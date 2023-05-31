@@ -32,9 +32,9 @@ pub fn string_val(value: u32) -> Value {
     Value::ValObj(Box::new(Obj::ObjString(value)))
 }
 
-pub fn as_bool(value: Value) -> bool {
+pub fn as_bool(value: &Value) -> bool {
     if let Value::ValBool(v) = value {
-        v
+        *v
     } else {
         panic!()
     }

@@ -16,6 +16,7 @@ pub struct Vm {
     pub stack_top: u8,
     pub compiler: Compiler,
     globals: HashMap<&'static str, Value>,
+    ip: usize,
 }
 
 #[derive(Debug)]
@@ -130,6 +131,8 @@ impl std::fmt::Debug for Vm {
                 }
                 OpCode::OpGetLocal(slot) => writeln!(f, "{} {:4}", "OpGetLocal", slot),
                 OpCode::OpSetLocal(slot) => writeln!(f, "{} {:4}", "OpSetLocal", slot),
+                OpCode::OpJumpIfFalse(offset) => writeln!(f, "{} {:8}", "OpJumpIfFalse", offset),
+                OpCode::OpJump(offset) => writeln!(f, "{} {:8}", "OpJump", offset),
             }?;
         }
         Ok(())
@@ -150,6 +153,7 @@ impl Vm {
             stack_top: 0,
             compiler,
             globals: HashMap::new(),
+            ip: 0,
         })
     }
 
@@ -159,16 +163,18 @@ impl Vm {
     }
 
     fn run(&mut self, debug: bool) -> Result<(), InterpretError> {
-        let code = self.chunk.code.clone();
+        let num_instructions = self.chunk.code.len();
         println!("{:?}", self);
-        for (i, instruction) in code.iter().enumerate() {
-            let line = self.chunk.get_line(i);
+
+        while self.ip < num_instructions {
+            let line = self.chunk.get_line(self.ip);
             if debug {
+                println!("=== STACK ===");
                 for value in &self.stack {
                     println!("[ {:?} ]", value);
                 }
             }
-            match instruction {
+            match &self.chunk.code[self.ip].clone() {
                 OpCode::OpConstant(c) => {
                     let constant = self.chunk.constants.get(c.clone() as usize).unwrap();
                     self.push(constant.clone());
@@ -216,7 +222,7 @@ impl Vm {
                     Ok(())
                 }
                 OpCode::OpNot => {
-                    let value = Vm::is_falsey(self.pop());
+                    let value = Vm::is_falsey(&self.pop());
                     self.push(bool_val(!value));
                     Ok(())
                 }
@@ -233,7 +239,7 @@ impl Vm {
                     if let Value::ValObj(_) = &val {
                         println!("{}", as_string(&self.compiler.strings, &as_obj(val)))
                     } else {
-                        println!("{:?}", self.pop());
+                        println!("{:?}", val);
                     }
                     Ok(())
                 }
@@ -284,7 +290,20 @@ impl Vm {
                     self.stack[*slot as usize] = Some(self.peek(0).clone());
                     Ok(())
                 }
+                OpCode::OpJumpIfFalse(offset) => {
+                    let value = self.peek(0);
+                    if Self::is_falsey(value) {
+                        self.ip += *offset as usize;
+                        continue;
+                    }
+                    Ok(())
+                }
+                OpCode::OpJump(offset) => {
+                    self.ip += *offset as usize;
+                    continue;
+                }
             }?;
+            self.ip += 1;
         }
         Ok(())
     }
@@ -334,12 +353,11 @@ impl Vm {
         Ok(())
     }
 
-    fn is_falsey(value: Value) -> bool {
-        return is_nil(&value) || is_bool(&value) && !as_bool(value);
+    fn is_falsey(value: &Value) -> bool {
+        return is_nil(value) || is_bool(value) && !as_bool(value);
     }
 
     fn concatenate(&mut self) -> Result<(), InterpretError> {
-        // println!("hello");
         let b = as_obj(self.pop());
         let a = as_obj(self.pop());
         let str_b = as_string(&self.compiler.strings, &b);
@@ -347,7 +365,6 @@ impl Vm {
         let id = self.compiler.strings.intern(&(str_a.to_string() + str_b));
 
         self.push(string_val(id));
-        // println!("{:?}", self.stack);
         Ok(())
     }
 }

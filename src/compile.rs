@@ -414,6 +414,25 @@ impl Compiler {
         self.current_chunk().write_chunk(code2, line)
     }
 
+    fn emit_jump(&mut self, code: OpCode) -> usize {
+        let mut line = 1;
+        if let Some(prev_token) = self.parser.previous.as_ref() {
+            line = prev_token.line
+        }
+        self.current_chunk().write_chunk(code, line);
+        self.current_chunk().counter - 1
+    }
+
+    fn patch_jump(&mut self, loc: usize) {
+        let cur = self.current_chunk().counter;
+        match self.current_chunk().code[loc] {
+            OpCode::OpJump(ref mut offset) | OpCode::OpJumpIfFalse(ref mut offset) => {
+                *offset = (cur - loc) as u16
+            }
+            _ => unreachable!(),
+        }
+    }
+
     fn current_chunk(&mut self) -> &mut Chunk {
         self.compiling_chunk.as_mut().unwrap()
     }
@@ -422,11 +441,6 @@ impl Compiler {
         let mut steps = || -> Result<(), InterpretError> {
             if self.matching(TokenType::Var)? {
                 self.var_declaration()
-            } else if self.matching(TokenType::LeftBrace)? {
-                self.begin_scope();
-                self.block()?;
-                self.end_scope();
-                Ok(())
             } else {
                 self.statement()
             }
@@ -479,13 +493,15 @@ impl Compiler {
         if self.scope_depth > 0 {
             return Ok(0);
         }
-        let prev_token = self.parser.previous.take().unwrap();
-        return Ok(self.identifier_constant(prev_token));
+        let prev_token = self.parser.previous.as_ref().unwrap().clone();
+        return Ok(self.identifier_constant(&prev_token));
     }
 
-    fn identifier_constant(&mut self, token: Token) -> u32 {
-        let value =
-            crate::value::Value::ValObj(Box::new(allocate_string(&mut self.strings, token.lexeme)));
+    fn identifier_constant(&mut self, token: &Token) -> u32 {
+        let value = crate::value::Value::ValObj(Box::new(allocate_string(
+            &mut self.strings,
+            token.lexeme.clone(),
+        )));
         let id = self.current_chunk().add_constant(value);
         return id as u32;
     }
@@ -495,7 +511,7 @@ impl Compiler {
             return Ok(());
         }
 
-        let token = self.parser.previous.take().unwrap();
+        let token = self.parser.previous.as_ref().unwrap().clone();
 
         for local in self.locals[..self.local_count as usize].iter().rev() {
             if local.is_none() || local.as_ref().unwrap().depth < self.scope_depth {
@@ -543,6 +559,12 @@ impl Compiler {
     fn statement(&mut self) -> Result<(), InterpretError> {
         if self.matching(TokenType::Print)? {
             self.print_statement()?;
+        } else if self.matching(TokenType::LeftBrace)? {
+            self.begin_scope();
+            self.block()?;
+            self.end_scope();
+        } else if self.matching(TokenType::If)? {
+            self.if_statement()?;
         } else {
             self.expression_statement()?;
         }
@@ -563,9 +585,29 @@ impl Compiler {
         Ok(())
     }
 
+    fn if_statement(&mut self) -> Result<(), InterpretError> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
+        self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after condition.")?;
+
+        let then_jump = self.emit_jump(OpCode::OpJumpIfFalse(u16::MAX));
+        self.emit_byte(OpCode::OpPop);
+        self.statement()?;
+        let else_jump = self.emit_jump(OpCode::OpJump(u16::MAX));
+        self.patch_jump(then_jump);
+        self.emit_byte(OpCode::OpPop);
+
+        if self.matching(TokenType::Else)? {
+            self.statement()?;
+        }
+        self.patch_jump(else_jump);
+        Ok(())
+    }
+
     fn expression_statement(&mut self) -> Result<(), InterpretError> {
         self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
+        println!("yeet");
         self.emit_byte(OpCode::OpPop);
         Ok(())
     }
@@ -599,15 +641,14 @@ impl Compiler {
     }
 
     fn variable(&mut self, can_assign: bool) -> Result<(), InterpretError> {
-        let token = self.parser.previous.take().unwrap();
-        self.named_variable(token, can_assign)
+        let token = self.parser.previous.as_ref().unwrap().clone();
+        self.named_variable(&token, can_assign)
     }
 
-    fn named_variable(&mut self, name: Token, can_assign: bool) -> Result<(), InterpretError> {
+    fn named_variable(&mut self, name: &Token, can_assign: bool) -> Result<(), InterpretError> {
         let arg = self.resolve_local(&name)?;
         let get_op: OpCode;
         let set_op: OpCode;
-        println!("{:?}", name);
         match arg {
             Some(idx) => {
                 get_op = OpCode::OpGetLocal(idx);
@@ -634,7 +675,6 @@ impl Compiler {
             .enumerate()
             .rev()
         {
-            println!("{:?}", maybe_local);
             if let Some(local) = maybe_local {
                 if local.name.lexeme == name.lexeme {
                     if local.is_uninitialized {

@@ -23,6 +23,8 @@ pub enum OpCode {
     OpDivide,
     OpPrint,
     OpPop,
+    OpJump(u16),
+    OpJumpIfFalse(u16),
     OpReturn,
 }
 
@@ -57,10 +59,8 @@ impl Chunk {
                 line: line.try_into().unwrap(),
                 offset: self.counter,
             });
-            self.counter += 1;
-        } else {
-            self.counter += 1;
         }
+        self.counter += 1;
     }
 
     pub fn add_constant(&mut self, value: Value) -> usize {
