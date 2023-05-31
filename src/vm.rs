@@ -128,6 +128,8 @@ impl std::fmt::Debug for Vm {
                     let name = as_string(&self.compiler.strings, &value);
                     writeln!(f, "{} {:4} {}", "OpSetGlobal", id, name)
                 }
+                OpCode::OpGetLocal(slot) => writeln!(f, "{} {:4}", "OpGetLocal", slot),
+                OpCode::OpSetLocal(slot) => writeln!(f, "{} {:4}", "OpSetLocal", slot),
             }?;
         }
         Ok(())
@@ -153,12 +155,12 @@ impl Vm {
 
     pub fn interpret(&mut self, debug: bool) -> Result<(), InterpretError> {
         self.run(debug)?;
-        println!("{:?}", self);
         Ok(())
     }
 
     fn run(&mut self, debug: bool) -> Result<(), InterpretError> {
         let code = self.chunk.code.clone();
+        println!("{:?}", self);
         for (i, instruction) in code.iter().enumerate() {
             let line = self.chunk.get_line(i);
             if debug {
@@ -271,6 +273,15 @@ impl Vm {
                             message: format!("Undefined variable '{}'.", name),
                         }));
                     }
+                    Ok(())
+                }
+                OpCode::OpGetLocal(slot) => {
+                    let value = self.stack[*slot as usize].as_ref().unwrap();
+                    self.push(value.clone());
+                    Ok(())
+                }
+                OpCode::OpSetLocal(slot) => {
+                    self.stack[*slot as usize] = Some(self.peek(0).clone());
                     Ok(())
                 }
             }?;

@@ -7,6 +7,8 @@ pub enum OpCode {
     OpDefineGlobal(u32),
     OpGetGlobal(u32),
     OpSetGlobal(u32),
+    OpGetLocal(u8),
+    OpSetLocal(u8),
     OpNil,
     OpTrue,
     OpFalse,
