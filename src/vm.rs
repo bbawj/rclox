@@ -133,6 +133,7 @@ impl std::fmt::Debug for Vm {
                 OpCode::OpSetLocal(slot) => writeln!(f, "{} {:4}", "OpSetLocal", slot),
                 OpCode::OpJumpIfFalse(offset) => writeln!(f, "{} {:8}", "OpJumpIfFalse", offset),
                 OpCode::OpJump(offset) => writeln!(f, "{} {:8}", "OpJump", offset),
+                OpCode::OpLoop(offset) => writeln!(f, "{} {:8}", "OpLoop", offset),
             }?;
         }
         Ok(())
@@ -249,7 +250,8 @@ impl Vm {
                 }
                 OpCode::OpDefineGlobal(id) => {
                     let val = self.pop();
-                    let name = self.compiler.strings.lookup(id.clone());
+                    let value = as_obj(self.chunk.get_constant(*id as usize).unwrap().clone());
+                    let name = as_string(&self.compiler.strings, &value);
                     self.globals.insert(name, val);
                     Ok(())
                 }
@@ -300,6 +302,10 @@ impl Vm {
                 }
                 OpCode::OpJump(offset) => {
                     self.ip += *offset as usize;
+                    continue;
+                }
+                OpCode::OpLoop(offset) => {
+                    self.ip -= *offset as usize;
                     continue;
                 }
             }?;

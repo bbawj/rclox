@@ -25,6 +25,7 @@ pub enum OpCode {
     OpPop,
     OpJump(u16),
     OpJumpIfFalse(u16),
+    OpLoop(u16),
     OpReturn,
 }
 
