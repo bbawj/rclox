@@ -1,6 +1,9 @@
 // pub type Value = f64;
 
-use crate::{interner::Interner, object::Obj};
+use crate::{
+    interner::Interner,
+    object::{Obj, ObjFunction},
+};
 
 pub type ValueArray = Vec<Value>;
 
@@ -32,6 +35,10 @@ pub fn string_val(value: u32) -> Value {
     Value::ValObj(Box::new(Obj::ObjString(value)))
 }
 
+pub fn native_val(value: fn(Vec<Option<Value>>) -> Value) -> Value {
+    Value::ValObj(Box::new(Obj::ObjNative(Box::new(value))))
+}
+
 pub fn as_bool(value: &Value) -> bool {
     if let Value::ValBool(v) = value {
         *v
@@ -59,6 +66,15 @@ pub fn as_obj(value: Value) -> Box<Obj> {
 pub fn as_string<'a>(interner: &'a Interner, obj: &'a Obj) -> &'static str {
     match obj {
         Obj::ObjString(id) => interner.lookup(*id),
+        Obj::ObjFunction(function) => interner.lookup(function.name_lookup),
+        _ => todo!(),
+    }
+}
+
+pub fn as_function(value: Value) -> Box<ObjFunction> {
+    match *as_obj(value) {
+        Obj::ObjFunction(function) => function,
+        _ => unreachable!(),
     }
 }
 
@@ -98,6 +114,18 @@ pub fn is_string(value: &Value) -> bool {
     if let Value::ValObj(a) = value {
         match a.as_ref() {
             Obj::ObjString(_) => true,
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
+pub fn is_native(value: &Value) -> bool {
+    if let Value::ValObj(a) = value {
+        match a.as_ref() {
+            Obj::ObjNative(_) => true,
+            _ => false,
         }
     } else {
         false
@@ -111,6 +139,7 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::ValNil, Value::ValNil) => true,
         (Value::ValObj(a), Value::ValObj(b)) => match (a.as_ref(), b.as_ref()) {
             (Obj::ObjString(a), Obj::ObjString(b)) => a == b,
+            _ => todo!(),
         },
         _ => false,
     }

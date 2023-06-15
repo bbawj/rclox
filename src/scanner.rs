@@ -64,10 +64,21 @@ pub enum TokenType {
     Eof,
 }
 
+#[derive(Clone)]
 pub struct Scanner {
     source: String,
     source_pos: usize,
     line: usize,
+}
+
+impl Default for Scanner {
+    fn default() -> Self {
+        Self {
+            source: String::new(),
+            source_pos: 0,
+            line: 1,
+        }
+    }
 }
 
 impl Scanner {

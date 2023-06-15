@@ -29,8 +29,8 @@ fn repl() -> Result<(), Box<dyn std::error::Error>> {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         println!("{:?}", input);
-        let mut vm = Vm::new(&input)?;
-        vm.interpret(false)?;
+        let mut vm = Vm::new()?;
+        vm.interpret(&input, false)?;
     }
 }
 
@@ -39,7 +39,10 @@ fn run_file(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = BufReader::new(file);
     let mut contents = String::new();
     reader.read_to_string(&mut contents)?;
-    let mut vm = Vm::new(&contents)?;
-    vm.interpret(false)?;
+    let mut vm = Vm::new()?;
+    match vm.interpret(&contents, false) {
+        Ok(_) => (),
+        Err(e) => println!("{:?}", e),
+    }
     Ok(())
 }

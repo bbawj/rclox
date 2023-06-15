@@ -1,6 +1,6 @@
 use crate::value::{Value, ValueArray};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OpCode {
     OpConstant(u8),
     OpConstantLong(u32),
@@ -26,10 +26,11 @@ pub enum OpCode {
     OpJump(u16),
     OpJumpIfFalse(u16),
     OpLoop(u16),
+    OpCall(u8),
     OpReturn,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: ValueArray,
@@ -37,7 +38,7 @@ pub struct Chunk {
     pub counter: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LineStart {
     line: usize,
     offset: usize,
@@ -89,7 +90,7 @@ impl Chunk {
             let mid = (left + right) / 2;
             if self.rle.get(mid).unwrap().offset < offset
                 && self.rle.get(mid + 1).is_some()
-                && self.rle.get(mid + 1).unwrap().offset < offset
+                && self.rle.get(mid + 1).unwrap().offset <= offset
             {
                 left = mid + 1;
             } else if self.rle.get(mid).unwrap().offset > offset {
