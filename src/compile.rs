@@ -9,7 +9,7 @@ use crate::{
     debug::disassemble_chunk,
     // debug::disassemble_chunk,
     interner::Interner,
-    object::{allocate_function, allocate_string, Obj, ObjFunction},
+    object::{allocate_function, allocate_string, Obj, ObjFunction, Upvalue, Local},
     scanner::{self, Scanner, Token, TokenType},
     value::{number_val, obj_val},
     vm::CompileError,
@@ -69,17 +69,69 @@ pub struct Compiler {
 struct CompiledItems {
     function: Box<ObjFunction>,
     function_type: FunctionType,
-    locals: [Option<Local>; 256],
-    local_count: u8,
     scope_depth: usize,
     enclosing: Option<Box<CompiledItems>>,
 }
 
-#[derive(Debug, Clone)]
-struct Local {
-    name: Token,
-    depth: usize,
-    is_uninitialized: bool,
+impl CompiledItems {
+    fn resolve_local(&mut self, name: &Token) -> Result<Option<u8>, CompileError> {
+        for (i, maybe_local) in self.function.locals[..self.function.local_count as usize]
+            .iter()
+            .enumerate()
+            .rev()
+        {
+            if let Some(local) = maybe_local {
+                if local.name.lexeme == name.lexeme {
+                    if local.is_uninitialized {
+                        return Err(CompileError {
+                            line: local.name.line,
+                            message: "Can't read local variable in its own initializer."
+                                .to_string(),
+                        });
+                    }
+                    return Ok(Some(i.try_into().unwrap()));
+                }
+            } else {
+                break;
+            }
+        }
+        return Ok(None);
+    }
+
+    fn resolve_upvalue(&mut self, name: &Token) -> Result<Option<u8>, CompileError> {
+        if self.enclosing.is_none() {
+            return Ok(None);
+        }
+
+        let local = self.enclosing.as_mut().unwrap().resolve_local(name)?;
+
+        if let Some(index) = local {
+            return Ok(Some(self.add_upvalue(index, true)));
+        }
+
+        if let Some(enclosing) = self.enclosing.as_mut() {
+            let upvalue = enclosing.resolve_upvalue(name)?;
+            if let Some(idx) = upvalue {
+                return Ok(Some(self.add_upvalue(idx, false)));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn add_upvalue(&mut self, index: u8, is_local: bool) -> u8 {
+        let upvalue_count = self.function.upvalue_count;
+        for i in 0..upvalue_count {
+            let upvalue = self.function.upvalues[i as usize].as_ref().unwrap();
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i;
+            }
+        }
+
+        self.function.upvalues[upvalue_count as usize] = Some(Upvalue {index, is_local});
+        self.function.upvalue_count += 1;
+        return upvalue_count;
+    }
 }
 
 type RuleArray = [ParseRule; 39];
@@ -328,23 +380,9 @@ lazy_static! {
 
 impl CompiledItems {
     pub fn new() -> Self {
-        const INIT_LOCAL: Option<Local> = None;
-        let mut locals = [INIT_LOCAL; 256];
-        locals[0] = Some(Local {
-            name: Token {
-                token_type: TokenType::Nil,
-                lexeme: String::new(),
-                line: 0,
-                literal: None,
-            },
-            depth: 0,
-            is_uninitialized: false,
-        });
         Self {
             function: allocate_function(INTERNER.lock().as_deref_mut().unwrap(), ""),
             function_type: FunctionType::Script,
-            locals,
-            local_count: 1,
             scope_depth: 0,
             enclosing: None,
         }
@@ -516,15 +554,15 @@ impl Compiler {
     fn end_scope(&mut self) {
         self.result.scope_depth -= 1;
 
-        while self.result.local_count > 0
-            && self.result.locals[self.result.local_count as usize - 1]
+        while self.result.function.local_count > 0
+            && self.result.function.locals[self.result.function.local_count as usize - 1]
                 .as_ref()
                 .unwrap()
                 .depth
                 > self.result.scope_depth
         {
             self.emit_byte(OpCode::OpPop);
-            self.result.local_count -= 1;
+            self.result.function.local_count -= 1;
         }
     }
 
@@ -572,9 +610,19 @@ impl Compiler {
         self.block()?;
 
         let result = self.end_compiler();
-        let line = self.parser.current.as_ref().unwrap().line;
-        self.current_chunk()
-            .write_constant(obj_val(Box::new(Obj::ObjFunction(result))), line);
+        let idx = self.current_chunk().add_constant(obj_val(Box::new(Obj::ObjFunction(result.clone()))));
+        self.emit_byte(OpCode::OpClosure(idx.try_into().unwrap()));
+
+        for i in 0..result.upvalue_count {
+            let upvalue = result.upvalues[i as usize].as_ref().unwrap().clone();
+            if upvalue.is_local {
+                self.emit_byte(OpCode::OpTrue);
+            } else {
+                self.emit_byte(OpCode::OpFalse);
+            }
+            self.emit_byte(OpCode::OpConstant(upvalue.index));
+        }
+        
         Ok(())
     }
 
@@ -620,7 +668,7 @@ impl Compiler {
 
         let token = self.parser.previous.as_ref().unwrap().clone();
 
-        for local in self.result.locals[..self.result.local_count as usize]
+        for local in self.result.function.locals[..self.result.function.local_count as usize]
             .iter()
             .rev()
         {
@@ -639,7 +687,7 @@ impl Compiler {
     }
 
     fn add_local(&mut self, name: Token) -> Result<(), CompileError> {
-        if self.result.local_count == 255 {
+        if self.result.function.local_count == 255 {
             return Err(CompileError {
                 line: name.line,
                 message: "Too many local variables in function.".to_string(),
@@ -650,8 +698,8 @@ impl Compiler {
             depth: self.result.scope_depth,
             is_uninitialized: true,
         };
-        self.result.locals[self.result.local_count as usize] = Some(local);
-        self.result.local_count += 1;
+        self.result.function.locals[self.result.function.local_count as usize] = Some(local);
+        self.result.function.local_count += 1;
         Ok(())
     }
 
@@ -667,7 +715,7 @@ impl Compiler {
         if self.result.scope_depth == 0 {
             return;
         }
-        self.result.locals[self.result.local_count as usize - 1]
+        self.result.function.locals[self.result.function.local_count as usize - 1]
             .as_mut()
             .unwrap()
             .is_uninitialized = false;
@@ -846,7 +894,7 @@ impl Compiler {
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) -> Result<(), CompileError> {
-        let arg = self.resolve_local(&name)?;
+        let arg = self.result.resolve_local(&name)?;
         let get_op: OpCode;
         let set_op: OpCode;
         match arg {
@@ -855,9 +903,17 @@ impl Compiler {
                 set_op = OpCode::OpSetLocal(idx);
             }
             None => {
-                let arg = self.identifier_constant(name);
-                get_op = OpCode::OpGetGlobal(arg);
-                set_op = OpCode::OpSetGlobal(arg);
+                match self.result.resolve_upvalue(&name)? {
+                    Some(idx) => {
+                        get_op = OpCode::OpGetUpvalue(idx);
+                        set_op = OpCode::OpSetUpvalue(idx);
+                    },
+                    None => {
+                        let arg = self.identifier_constant(name);
+                        get_op = OpCode::OpGetGlobal(arg);
+                        set_op = OpCode::OpSetGlobal(arg);
+                    },
+                }
             }
         }
         if can_assign && self.matching(TokenType::Equal)? {
@@ -869,29 +925,6 @@ impl Compiler {
         Ok(())
     }
 
-    fn resolve_local(&mut self, name: &Token) -> Result<Option<u8>, CompileError> {
-        for (i, maybe_local) in self.result.locals[..self.result.local_count as usize]
-            .iter()
-            .enumerate()
-            .rev()
-        {
-            if let Some(local) = maybe_local {
-                if local.name.lexeme == name.lexeme {
-                    if local.is_uninitialized {
-                        return Err(CompileError {
-                            line: local.name.line,
-                            message: "Can't read local variable in its own initializer."
-                                .to_string(),
-                        });
-                    }
-                    return Ok(Some(i.try_into().unwrap()));
-                }
-            } else {
-                break;
-            }
-        }
-        return Ok(None);
-    }
 
     fn literal(&mut self, can_assign: bool) -> Result<(), CompileError> {
         let prev_token = self.parser.previous.as_ref().unwrap();

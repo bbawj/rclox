@@ -9,6 +9,8 @@ pub enum OpCode {
     OpSetGlobal(u32),
     OpGetLocal(u8),
     OpSetLocal(u8),
+    OpGetUpvalue(u8),
+    OpSetUpvalue(u8),
     OpNil,
     OpTrue,
     OpFalse,
@@ -27,10 +29,11 @@ pub enum OpCode {
     OpJumpIfFalse(u16),
     OpLoop(u16),
     OpCall(u8),
+    OpClosure(u8),
     OpReturn,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: ValueArray,

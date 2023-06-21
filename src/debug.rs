@@ -1,7 +1,7 @@
 use crate::{
     chunk::{Chunk, OpCode},
     compile::INTERNER,
-    value::{as_obj, as_string},
+    value::{as_obj, as_string, as_function, bool_val, as_bool, as_number},
     vm::Vm,
 };
 
@@ -76,7 +76,7 @@ pub fn disassemble_instruction(chunk: &Chunk, instruction: &OpCode, offset: usiz
             );
         }
         OpCode::OpSetGlobal(id) => {
-            let value = as_obj(Vm::read_constant(chunk, *id as usize));
+            let value = as_obj(chunk.get_constant(*id as usize).unwrap().clone());
             let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
             println!("{} {:4} {}", "OpSetGlobal", id, name)
         }
@@ -88,6 +88,23 @@ pub fn disassemble_instruction(chunk: &Chunk, instruction: &OpCode, offset: usiz
         OpCode::OpCall(arg_count) => {
             println!("{} {:8}", "OpCall", arg_count);
         }
+        OpCode::OpClosure(idx) => {
+            println!("{} {:8}", "OpClosure", offset);
+            let function = as_function(chunk.get_constant(*idx as usize).unwrap().clone());
+            for _ in 0..function.upvalue_count {
+                let is_local = chunk.code.get(offset + 1).unwrap();
+                let index = chunk.code.get(offset + 2).unwrap();
+                    if let OpCode::OpConstant(i) = index {
+                        match is_local {
+                            OpCode::OpTrue => println!("{:04}    | {} {}", offset, "local", i),
+                            OpCode::OpFalse => println!("{:04}   | {} {}", offset, "upvalue", i),
+                            _ => unreachable!()
+                        }
+                }
+            }
+        }
+        OpCode::OpGetUpvalue(id) => println!("{} {:8}", "OpGetUpvalue", id),
+        OpCode::OpSetUpvalue(id) => println!("{} {:8}", "OpSetUpValue", id),
     }
 }
 

@@ -1,22 +1,22 @@
 use std::{
     collections::HashMap,
-    time::{self, SystemTime},
+    time::{self, SystemTime}, rc::Rc, cell::RefCell,
 };
 
 use crate::{
     chunk::{Chunk, OpCode},
     compile::{Compiler, INTERNER},
-    object::{Obj, ObjFunction},
+    object::{Obj, ObjFunction, allocate_closure, ObjClosure, allocate_upvalue},
     scanner::Scanner,
     value::{
         as_bool, as_function, as_number, as_obj, as_string, bool_val, is_bool, is_nil, is_number,
-        is_string, native_val, nil_val, number_val, string_val, values_equal, Value,
+        is_string, native_val, nil_val, number_val, string_val, values_equal, Value, obj_val,
     },
 };
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
-    function: ObjFunction,
+    closure: ObjClosure,
     ip: usize,
     slots_start: usize,
 }
@@ -80,102 +80,6 @@ impl From<RuntimeError> for InterpretError {
 
 impl std::error::Error for InterpretError {}
 
-// impl std::fmt::Debug for Vm {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let mut frame_count = self.frame_count;
-//         println!("{}", frame_count);
-//         let mut frame = self.frames[frame_count as usize - 1]
-//             .as_ref()
-//             .unwrap()
-//             .clone();
-//         writeln!(f, "== VM ==")?;
-//
-//         loop {
-//             let offset = frame.ip;
-//             write!(f, "{:04} ", offset)?;
-//
-//             let line = frame.function.chunk.get_line(frame.ip.into());
-//             if offset > 0 && line == frame.function.chunk.get_line(offset - 1) {
-//                 write!(f, "   | ")?;
-//             } else {
-//                 write!(f, "{:4} ", line)?;
-//             }
-//
-//             match self.read_byte(&mut frame) {
-//                 OpCode::OpReturn => {
-//                     writeln!(f, "OpReturn")?;
-//                     frame_count -= 1;
-//                     if frame_count == 0 {
-//                         break Ok(());
-//                     }
-//                     frame = self.frames[frame_count as usize - 1]
-//                         .as_ref()
-//                         .unwrap()
-//                         .clone();
-//                     Ok(())
-//                 }
-//                 OpCode::OpConstant(c) => {
-//                     write!(f, "{} {:4} ", "OpConstant", c)?;
-//                     match Vm::read_constant(&frame, c as usize) {
-//                         Value::ValBool(v) => writeln!(f, "{}", v),
-//                         Value::ValNumber(v) => writeln!(f, "{}", v),
-//                         Value::ValNil => writeln!(f),
-//                         Value::ValObj(v) => {
-//                             writeln!(f, "{}", as_string(INTERNER.lock().as_deref().unwrap(), &v))
-//                         }
-//                     }
-//                 }
-//                 OpCode::OpConstantLong(c) => writeln!(
-//                     f,
-//                     "{} {:4} {:?}",
-//                     "OpConstantLong",
-//                     c,
-//                     Vm::read_constant(&frame.function.chunk, c as usize)
-//                 ),
-//                 OpCode::OpNegate => writeln!(f, "OpNegate"),
-//                 OpCode::OpAdd => writeln!(f, "OpAdd"),
-//                 OpCode::OpSubtract => writeln!(f, "OpSubtract"),
-//                 OpCode::OpMultiply => writeln!(f, "OpMultiply"),
-//                 OpCode::OpDivide => writeln!(f, "OpDivide"),
-//                 OpCode::OpNil => writeln!(f, "OpNil"),
-//                 OpCode::OpTrue => writeln!(f, "OpTrue"),
-//                 OpCode::OpFalse => writeln!(f, "OpFalse"),
-//                 OpCode::OpNot => writeln!(f, "OpNot"),
-//                 OpCode::OpEqual => writeln!(f, "OpEqual"),
-//                 OpCode::OpGreater => writeln!(f, "OpGreater"),
-//                 OpCode::OpLess => writeln!(f, "OpLess"),
-//                 OpCode::OpPrint => writeln!(f, "OpPrint"),
-//                 OpCode::OpPop => writeln!(f, "OpPop"),
-//                 OpCode::OpDefineGlobal(id) => {
-//                     let value = as_obj(Vm::read_constant(&frame.function.chunk, id as usize));
-//                     let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
-//                     writeln!(f, "{} {:4} {}", "OpDefineGlobal", id, name)
-//                 }
-//                 OpCode::OpGetGlobal(id) => {
-//                     let value = as_obj(Vm::read_constant(&frame.function.chunk, id as usize));
-//                     let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
-//                     writeln!(f, "{} {:4} {}", "OpGetGlobal", id, name)
-//                 }
-//                 OpCode::OpSetGlobal(id) => {
-//                     let value = as_obj(Vm::read_constant(&frame.function.chunk, id as usize));
-//                     let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
-//                     writeln!(f, "{} {:4} {}", "OpSetGlobal", id, name)
-//                 }
-//                 OpCode::OpGetLocal(slot) => writeln!(f, "{} {:4}", "OpGetLocal", slot),
-//                 OpCode::OpSetLocal(slot) => writeln!(f, "{} {:4}", "OpSetLocal", slot),
-//                 OpCode::OpJumpIfFalse(offset) => writeln!(f, "{} {:8}", "OpJumpIfFalse", offset),
-//                 OpCode::OpJump(offset) => writeln!(f, "{} {:8}", "OpJump", offset),
-//                 OpCode::OpLoop(offset) => writeln!(f, "{} {:8}", "OpLoop", offset),
-//                 OpCode::OpCall(arg_count) => {
-//                     writeln!(f, "{} {:8}", "OpCall", arg_count),
-//                     frame = self.frames[]
-//                     writeln!(f, "{}", )
-//                 }
-//             }?;
-//         }
-//     }
-// }
-
 const INIT: Option<Value> = None;
 const INIT_FRAME: Option<CallFrame> = None;
 
@@ -185,7 +89,8 @@ impl Vm {
 
         let frames = [INIT_FRAME; FRAMES_MAX as usize];
 
-        let stack = [INIT; STACK_MAX as usize];
+        let mut stack = [INIT; STACK_MAX as usize];
+        stack[0] = Some(Value::ValNil);
 
         Ok(Self {
             stack,
@@ -205,8 +110,11 @@ impl Vm {
         let function = self.compiler.compile()?;
 
         self.push(Value::ValObj(Box::new(Obj::ObjFunction(function.clone()))));
+        let closure = allocate_closure(function);
+        self.pop();
+        self.push(obj_val(Box::new(Obj::ObjClosure(closure.clone()))));
 
-        self.call(*function, 0, 1)?;
+        self.call(closure, 0, 1)?;
 
         match self.run(debug) {
             Ok(_) => (),
@@ -220,7 +128,7 @@ impl Vm {
                         .unwrap()
                         .as_ref()
                         .unwrap();
-                    let function = &frame.function;
+                    let function = &frame.closure.function;
                     let instruction_offset = function.chunk.code.len() - 1 - frame.ip - 2;
                     print!("[line {}] in ", function.chunk.get_line(instruction_offset));
                     let name = INTERNER
@@ -242,13 +150,13 @@ impl Vm {
     }
 
     fn read_byte(frame: &mut CallFrame) -> OpCode {
-        let byte = &frame.function.chunk.code[frame.ip as usize];
+        let byte = &frame.closure.function.chunk.code[frame.ip as usize];
         frame.ip += 1;
         byte.clone()
     }
 
-    pub fn read_constant(chunk: &Chunk, loc: usize) -> Value {
-        chunk.constants.get(loc).unwrap().clone()
+    pub fn read_constant(frame: &CallFrame, loc: usize) -> Value {
+        frame.closure.function.chunk.constants.get(loc).unwrap().clone()
     }
 
     fn run(&mut self, debug: bool) -> Result<(), RuntimeError> {
@@ -258,7 +166,7 @@ impl Vm {
             .clone();
 
         loop {
-            let line = frame.function.chunk.get_line(frame.ip.into());
+            let line = frame.closure.function.chunk.get_line(frame.ip.into());
             let byte = &Vm::read_byte(&mut frame);
 
             if debug {
@@ -273,7 +181,7 @@ impl Vm {
             }
             match byte {
                 OpCode::OpConstant(c) => {
-                    let constant = Vm::read_constant(&frame.function.chunk, (*c).into());
+                    let constant = Vm::read_constant(&frame, (*c).into());
                     self.push(constant.clone());
                 }
                 OpCode::OpConstantLong(c) => {
@@ -355,7 +263,7 @@ impl Vm {
                 OpCode::OpDefineGlobal(id) => {
                     let val = self.pop();
                     let value = as_obj(Vm::read_constant(
-                        &frame.function.chunk,
+                        &frame,
                         (*id).try_into().unwrap(),
                     ));
                     let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
@@ -363,7 +271,7 @@ impl Vm {
                 }
                 OpCode::OpGetGlobal(id) => {
                     let value = as_obj(Vm::read_constant(
-                        &frame.function.chunk,
+                        &frame,
                         (*id).try_into().unwrap(),
                     ));
                     let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
@@ -378,7 +286,7 @@ impl Vm {
                 }
                 OpCode::OpSetGlobal(id) => {
                     let value = as_obj(Vm::read_constant(
-                        &frame.function.chunk,
+                        &frame,
                         (*id).try_into().unwrap(),
                     ));
                     let name = as_string(INTERNER.lock().as_deref().unwrap(), &value);
@@ -422,16 +330,53 @@ impl Vm {
                         .unwrap()
                         .clone();
                 }
+                OpCode::OpClosure(idx) => {
+                    let func = as_function(Vm::read_constant(&frame, *idx as usize));
+                    let mut closure = allocate_closure(func);
+                    let upvalue_count = closure.upvalue_count;
+
+                    self.push(obj_val(Box::new(Obj::ObjClosure(closure.clone()))));
+                    for i in 0..upvalue_count {
+                        let is_local = Vm::read_byte(&mut frame);
+                        let byte = Vm::read_byte(&mut frame);
+                        if let OpCode::OpConstant(index) = byte {
+                            match is_local {
+                                OpCode::OpTrue => closure.upvalues[i as usize] = Some(Vm::capture_upvalue(&self.stack[frame.slots_start + index as usize].as_ref().unwrap())),
+                                OpCode::OpFalse => closure.upvalues[i as usize] = frame.closure.upvalues[index as usize].clone(),
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            println!("{:?}", byte);
+                            unreachable!()
+                        }
+                    }
+                    self.pop();
+                    self.push(obj_val(Box::new(Obj::ObjClosure(closure.clone()))));
+                },
+                OpCode::OpGetUpvalue(idx) => {
+                    self.push(frame.closure.upvalues.get(*idx as usize).unwrap().as_ref().unwrap().location.borrow().clone())
+                },
+                OpCode::OpSetUpvalue(idx) => {
+                    frame.closure.upvalues[*idx as usize].as_mut().unwrap().location.replace(self.peek(0).clone());
+                },
             };
         }
         return Ok(());
+    }
+
+    fn capture_upvalue(value: &Value) -> crate::object::ObjUpvalue {
+        match value {
+            Value::ValUpvalue(upvalue) => allocate_upvalue(Rc::clone(upvalue)),
+            _ => crate::object::ObjUpvalue{ location: Rc::new(RefCell::new(value.clone())) }
+        }
     }
 
     fn call_value(&mut self, arg_count: u8, line: usize) -> Result<(), RuntimeError> {
         let callee = self.peek(arg_count.into());
         match callee {
             Value::ValObj(obj) => match obj.as_ref() {
-                Obj::ObjFunction(function) => self.call(*function.clone(), arg_count, line),
+                // Obj::ObjFunction(function) => self.call(*function.clone(), arg_count, line),
+                Obj::ObjClosure(closure) => self.call(closure.clone(), arg_count, line),
                 Obj::ObjNative(function) => {
                     let start_arg_index = (self.stack_top - arg_count) as usize;
                     let result = function(self.stack[start_arg_index..].to_vec());
@@ -439,7 +384,9 @@ impl Vm {
                     self.push(result);
                     Ok(())
                 }
-                _ => unreachable!(),
+                Obj::ObjString(_) => todo!(),
+                Obj::ObjFunction(_) => todo!(),
+                Obj::ObjUpvalue(_) => todo!(),
             },
             _ => {
                 return Err(RuntimeError {
@@ -452,16 +399,16 @@ impl Vm {
 
     fn call(
         &mut self,
-        function: ObjFunction,
+        closure: ObjClosure,
         arg_count: u8,
         line: usize,
     ) -> Result<(), RuntimeError> {
-        if arg_count != function.arity {
+        if arg_count != closure.function.arity {
             return Err(RuntimeError {
                 line,
                 message: format!(
                     "Expected {} arguments but got {}.",
-                    function.arity, arg_count
+                    closure.function.arity, arg_count
                 ),
             });
         }
@@ -474,7 +421,7 @@ impl Vm {
         }
 
         self.frames[self.frame_count as usize] = Some(CallFrame {
-            function,
+            closure,
             ip: 0,
             slots_start: self.stack_top as usize - arg_count as usize - 1,
         });
@@ -513,8 +460,8 @@ impl Vm {
                 message: "Operands must be numbers.".to_string(),
             });
         }
-        let b = as_number(self.pop());
-        let a = as_number(self.pop());
+        let b = as_number(&self.pop());
+        let a = as_number(&self.pop());
         match op {
             '+' => self.push(number_val(a + b)),
             '-' => self.push(number_val(a - b)),

@@ -1,5 +1,7 @@
 // pub type Value = f64;
 
+use std::{rc::Rc, cell::RefCell};
+
 use crate::{
     interner::Interner,
     object::{Obj, ObjFunction},
@@ -7,12 +9,13 @@ use crate::{
 
 pub type ValueArray = Vec<Value>;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Value {
     ValBool(bool),
     ValNumber(f64),
     ValNil,
     ValObj(Box<Obj>),
+    ValUpvalue(Rc<RefCell<Value>>)
 }
 
 pub fn bool_val(value: bool) -> Value {
@@ -47,9 +50,9 @@ pub fn as_bool(value: &Value) -> bool {
     }
 }
 
-pub fn as_number(value: Value) -> f64 {
+pub fn as_number(value: &Value) -> f64 {
     if let Value::ValNumber(v) = value {
-        v
+        *v
     } else {
         panic!()
     }
@@ -67,6 +70,7 @@ pub fn as_string<'a>(interner: &'a Interner, obj: &'a Obj) -> &'static str {
     match obj {
         Obj::ObjString(id) => interner.lookup(*id),
         Obj::ObjFunction(function) => interner.lookup(function.name_lookup),
+        Obj::ObjClosure(closure) => interner.lookup(closure.function.name_lookup),
         _ => todo!(),
     }
 }
