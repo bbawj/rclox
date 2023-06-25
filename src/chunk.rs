@@ -30,10 +30,11 @@ pub enum OpCode {
     OpLoop(u16),
     OpCall(u8),
     OpClosure(u8),
+    OpCloseUpvalue,
     OpReturn,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: ValueArray,

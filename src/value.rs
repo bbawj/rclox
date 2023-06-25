@@ -9,13 +9,12 @@ use crate::{
 
 pub type ValueArray = Vec<Value>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     ValBool(bool),
     ValNumber(f64),
     ValNil,
     ValObj(Box<Obj>),
-    ValUpvalue(Rc<RefCell<Value>>)
 }
 
 pub fn bool_val(value: bool) -> Value {

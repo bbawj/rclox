@@ -106,6 +106,7 @@ impl CompiledItems {
         let local = self.enclosing.as_mut().unwrap().resolve_local(name)?;
 
         if let Some(index) = local {
+            self.enclosing.as_mut().unwrap().function.locals.as_mut().get_mut(index as usize).unwrap().as_mut().unwrap().is_captured = true;
             return Ok(Some(self.add_upvalue(index, true)));
         }
 
@@ -561,7 +562,12 @@ impl Compiler {
                 .depth
                 > self.result.scope_depth
         {
-            self.emit_byte(OpCode::OpPop);
+            if self.result.function.locals.get(self.result.function.local_count as usize - 1).unwrap().as_ref().unwrap().is_captured {
+                self.emit_byte(OpCode::OpCloseUpvalue);
+            } else {
+                self.emit_byte(OpCode::OpPop);
+            }
+
             self.result.function.local_count -= 1;
         }
     }
@@ -697,6 +703,7 @@ impl Compiler {
             name,
             depth: self.result.scope_depth,
             is_uninitialized: true,
+            is_captured: false,
         };
         self.result.function.locals[self.result.function.local_count as usize] = Some(local);
         self.result.function.local_count += 1;

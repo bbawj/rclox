@@ -6,7 +6,7 @@ use std::{
 use crate::{
     chunk::{Chunk, OpCode},
     compile::{Compiler, INTERNER},
-    object::{Obj, ObjFunction, allocate_closure, ObjClosure, allocate_upvalue},
+    object::{Obj, ObjFunction, allocate_closure, ObjClosure, allocate_upvalue, ObjUpvalue},
     scanner::Scanner,
     value::{
         as_bool, as_function, as_number, as_obj, as_string, bool_val, is_bool, is_nil, is_number,
@@ -30,6 +30,7 @@ pub struct Vm {
     pub stack: [Option<Value>; STACK_MAX as usize],
     pub stack_top: u8,
     pub compiler: Compiler,
+    pub open_upvalues: *mut ObjUpvalue,
     globals: HashMap<&'static str, Value>,
 }
 
@@ -99,6 +100,7 @@ impl Vm {
             globals: HashMap::new(),
             frames,
             frame_count: 0,
+            open_upvalues: std::ptr::null_mut(),
         })
     }
 
@@ -191,6 +193,7 @@ impl Vm {
                 OpCode::OpReturn => {
                     let result = self.pop();
                     let slots_start = frame.slots_start;
+                    self.close_upvalues(slots_start.try_into().unwrap());
                     // self.frames[self.frame_count as usize] = Some(frame);
                     self.frame_count -= 1;
                     if self.frame_count == 0 {
@@ -340,34 +343,86 @@ impl Vm {
                         let is_local = Vm::read_byte(&mut frame);
                         let byte = Vm::read_byte(&mut frame);
                         if let OpCode::OpConstant(index) = byte {
+                            let val = self.stack[frame.slots_start + index as usize].as_ref().unwrap().clone();
                             match is_local {
-                                OpCode::OpTrue => closure.upvalues[i as usize] = Some(Vm::capture_upvalue(&self.stack[frame.slots_start + index as usize].as_ref().unwrap())),
-                                OpCode::OpFalse => closure.upvalues[i as usize] = frame.closure.upvalues[index as usize].clone(),
+                                OpCode::OpTrue => closure.upvalues[i as usize] = self.capture_upvalue(frame.slots_start + index as usize, val),
+                                OpCode::OpFalse => closure.upvalues[i as usize] = frame.closure.upvalues[index as usize],
                                 _ => unreachable!(),
                             }
                         } else {
-                            println!("{:?}", byte);
                             unreachable!()
                         }
                     }
+                    // unsafe {
+                    //     if upvalue_count > 0 {
+                    //         println!("got {:?}", (*closure.upvalues[0]).value);
+                    //     }
+                    // }
                     self.pop();
-                    self.push(obj_val(Box::new(Obj::ObjClosure(closure.clone()))));
+                    self.push(obj_val(Box::new(Obj::ObjClosure(closure))));
                 },
                 OpCode::OpGetUpvalue(idx) => {
-                    self.push(frame.closure.upvalues.get(*idx as usize).unwrap().as_ref().unwrap().location.borrow().clone())
+                    unsafe {
+                        let val = (*frame.closure.upvalues[*idx as usize]).value;
+                        self.push(val.read().clone());
+                    }
                 },
                 OpCode::OpSetUpvalue(idx) => {
-                    frame.closure.upvalues[*idx as usize].as_mut().unwrap().location.replace(self.peek(0).clone());
+                    unsafe {
+                        let new_value = &mut self.peek(0).clone() as *mut Value;
+                        (*(frame.closure.upvalues[*idx as usize])).value.swap(new_value);
+                    }
+                },
+                OpCode::OpCloseUpvalue => {
+                    self.close_upvalues(self.stack_top - 1);
+                    self.pop();
                 },
             };
         }
         return Ok(());
     }
 
-    fn capture_upvalue(value: &Value) -> crate::object::ObjUpvalue {
-        match value {
-            Value::ValUpvalue(upvalue) => allocate_upvalue(Rc::clone(upvalue)),
-            _ => crate::object::ObjUpvalue{ location: Rc::new(RefCell::new(value.clone())) }
+    fn capture_upvalue(&mut self, location: usize, value: Value) -> *mut ObjUpvalue {
+        let mut prev_upvalue: *mut ObjUpvalue = std::ptr::null_mut();
+        let cur_upvalue = self.open_upvalues;
+        unsafe {
+            loop {
+                if cur_upvalue.is_null() || (*cur_upvalue).location <= location {
+                    break;
+                }
+                prev_upvalue = cur_upvalue;
+                cur_upvalue.swap((*cur_upvalue).next);
+            }
+            if !cur_upvalue.is_null() && (*cur_upvalue).location == location {
+                return cur_upvalue;
+            }
+
+            let created_upvalue = Box::into_raw(allocate_upvalue(location, value));
+            (*created_upvalue).next = cur_upvalue;
+            
+            if prev_upvalue.is_null() {
+                self.open_upvalues = created_upvalue;
+                assert!((*self.open_upvalues).next.is_null());
+                return self.open_upvalues;
+            } else {
+                (*prev_upvalue).next.swap(created_upvalue);
+                return created_upvalue;
+            }
+        }
+    }
+
+    fn close_upvalues(&mut self, start: u8) {
+        unsafe {
+            loop {
+                if self.open_upvalues.is_null() || (*self.open_upvalues).location < start.into() {
+                    break;
+                }
+
+                let upvalue = self.open_upvalues;
+                (*upvalue).closed = Box::new((*upvalue).value.read());
+                (*upvalue).value.swap((*upvalue).closed.as_mut() as *mut Value);
+                self.open_upvalues = (*upvalue).next;
+            }
         }
     }
 
@@ -375,7 +430,6 @@ impl Vm {
         let callee = self.peek(arg_count.into());
         match callee {
             Value::ValObj(obj) => match obj.as_ref() {
-                // Obj::ObjFunction(function) => self.call(*function.clone(), arg_count, line),
                 Obj::ObjClosure(closure) => self.call(closure.clone(), arg_count, line),
                 Obj::ObjNative(function) => {
                     let start_arg_index = (self.stack_top - arg_count) as usize;
@@ -384,9 +438,7 @@ impl Vm {
                     self.push(result);
                     Ok(())
                 }
-                Obj::ObjString(_) => todo!(),
-                Obj::ObjFunction(_) => todo!(),
-                Obj::ObjUpvalue(_) => todo!(),
+                _ => unreachable!()
             },
             _ => {
                 return Err(RuntimeError {
@@ -451,6 +503,7 @@ impl Vm {
 
     fn reset_stack(&mut self) {
         self.stack_top = 0;
+        self.open_upvalues = std::ptr::null_mut();
     }
 
     fn binary_op(&mut self, op: char, line: usize) -> Result<(), RuntimeError> {

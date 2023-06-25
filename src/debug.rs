@@ -105,6 +105,7 @@ pub fn disassemble_instruction(chunk: &Chunk, instruction: &OpCode, offset: usiz
         }
         OpCode::OpGetUpvalue(id) => println!("{} {:8}", "OpGetUpvalue", id),
         OpCode::OpSetUpvalue(id) => println!("{} {:8}", "OpSetUpValue", id),
+        OpCode::OpCloseUpvalue => simple_instruction("OpCloseUpvalue", offset),
     }
 }
 
